@@ -6,12 +6,13 @@ import open from 'open';
 import pc from 'picocolors';
 import {
   AUTH_CALLBACK_TIMEOUT_MS,
+  AUTH_PROMPT_AFTER_MS,
   OAUTH_AUTHORIZE_PATH,
-  OAUTH_CLIENT_ID,
   OAUTH_REGISTER_PATH,
   OAUTH_SCOPES,
   OAUTH_TOKEN_PATH,
   authBaseUrl,
+  oauthClientId,
   type Region,
   type WizardOptions,
 } from './config.js';
@@ -73,7 +74,7 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
   }
 
   const authBase = authBaseUrl(options.region);
-  const clientId = OAUTH_CLIENT_ID ?? (await registerClient(authBase));
+  const clientId = oauthClientId(options.region) ?? (await registerClient(authBase));
 
   // Loopback server for the OAuth redirect.
   const { server, port, callbackPromise } = await startCallbackServer();
@@ -106,15 +107,7 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
 
   let code: string;
   try {
-    const callback = await Promise.race([
-      callbackPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('Timed out waiting for browser login. Re-run the installer to try again.')),
-          AUTH_CALLBACK_TIMEOUT_MS,
-        ).unref(),
-      ),
-    ]);
+    const callback = await waitForCallback(callbackPromise, spinner);
     if (callback.state !== state) {
       throw new Error('OAuth state mismatch — aborting login for safety. Re-run the installer.');
     }
@@ -156,6 +149,54 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
     userEmail: claims.userEmail,
     region: claims.region ?? options.region,
   };
+}
+
+/**
+ * Waits for the OAuth loopback callback. After AUTH_PROMPT_AFTER_MS of
+ * silence, asks whether to keep waiting instead of giving up — a first-time
+ * signup detours through email verification and password setup, which takes
+ * far longer than any reasonable silent timeout, and the flow can only
+ * complete if this process keeps listening. Gives up for good once
+ * AUTH_CALLBACK_TIMEOUT_MS elapses.
+ */
+async function waitForCallback(
+  callbackPromise: Promise<CallbackResult>,
+  spinner: ReturnType<typeof p.spinner>,
+): Promise<CallbackResult> {
+  const deadline = Date.now() + AUTH_CALLBACK_TIMEOUT_MS;
+  for (;;) {
+    const waitMs = Math.min(AUTH_PROMPT_AFTER_MS, deadline - Date.now());
+    if (waitMs <= 0) {
+      throw new Error('Timed out waiting for browser login. Re-run the installer to try again.');
+    }
+    const result = await Promise.race([
+      callbackPromise,
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), waitMs).unref()),
+    ]);
+    if (result !== 'timeout') {
+      return result;
+    }
+
+    spinner.stop('Still waiting for browser login.');
+    const keepWaiting = await Promise.race([
+      callbackPromise,
+      p.confirm({
+        message:
+          'Keep waiting? (If you just created an account, finish the email verification ' +
+          'and password steps in your browser — this window will pick the login back up.)',
+      }),
+    ]);
+    if (typeof keepWaiting === 'object') {
+      // The callback arrived while the prompt was up.
+      spinner.start('Finishing login…');
+      return keepWaiting;
+    }
+    if (p.isCancel(keepWaiting) || !keepWaiting) {
+      spinner.start('Waiting for you to finish logging in…');
+      throw new Error('Login canceled. Re-run the installer to try again.');
+    }
+    spinner.start('Waiting for you to finish logging in…');
+  }
 }
 
 /** RFC 7591 dynamic client registration — same call MCP clients make. */
@@ -205,7 +246,7 @@ async function startCallbackServer(): Promise<{
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(
       error
-        ? '<html><body><h2>Login failed</h2><p>You can close this tab and return to the terminal.</p></body></html>'
+        ? '<html><body><h2>Login didn&rsquo;t complete</h2><p>Close this tab, return to your terminal, and re-run <code>npx @subtext/install</code> to try again.</p></body></html>'
         : '<html><body><h2>Logged in to Subtext</h2><p>You can close this tab and return to the terminal.</p></body></html>',
     );
     resolveCallback({

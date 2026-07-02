@@ -49,11 +49,25 @@ export const OAUTH_TOKEN_PATH = '/oauth/token';
 export const OAUTH_REGISTER_PATH = '/oauth/register';
 
 /**
- * OAuth client id for the wizard. When unset, the wizard dynamically
- * registers itself (RFC 7591) on each run — this works today but a
- * pre-registered first-party client id should replace it (see plan doc).
+ * Pre-registered Subtext OAuth client ids, per realm. Populate once the
+ * Subtext client is registered in each realm's heimdall (required for the
+ * Subtext-branded OAuth pages — heimdall keys branding off a stable
+ * client_id; see mn PR cowpaths/mn#106970). Until then the wizard falls back
+ * to RFC 7591 dynamic registration on each run.
  */
-export const OAUTH_CLIENT_ID = process.env.SUBTEXT_OAUTH_CLIENT_ID;
+const PREREGISTERED_OAUTH_CLIENT_IDS: Partial<Record<Region, string>> = {
+  // us: pending pre-registration
+  // eu: pending pre-registration
+};
+
+/**
+ * OAuth client id for the wizard. Resolution order: SUBTEXT_OAUTH_CLIENT_ID
+ * env override → pre-registered per-realm client id → undefined, in which
+ * case the wizard dynamically registers itself (RFC 7591) on each run.
+ */
+export function oauthClientId(region: Region): string | undefined {
+  return process.env.SUBTEXT_OAUTH_CLIENT_ID ?? PREREGISTERED_OAUTH_CLIENT_IDS[region];
+}
 
 /**
  * Scopes requested during authorization. The install itself needs none of
@@ -79,7 +93,19 @@ export function telemetryUrl(region: Region): string {
   return `${apiBaseUrl(region)}${TELEMETRY_PATH}`;
 }
 
-export const AUTH_CALLBACK_TIMEOUT_MS = 5 * 60_000;
+/**
+ * How long the browser-login wait stays silent before asking the user whether
+ * to keep waiting. Kept short enough that a stuck login surfaces quickly.
+ */
+export const AUTH_PROMPT_AFTER_MS = 5 * 60_000;
+
+/**
+ * Hard cap on the whole browser login. Deliberately long: a first-time signup
+ * detours through email verification and password setup, and the loopback
+ * server must still be listening when the OAuth flow restarts and delivers
+ * the code afterwards.
+ */
+export const AUTH_CALLBACK_TIMEOUT_MS = 60 * 60_000;
 
 export interface WizardOptions {
   /** Directory of the app being instrumented. Defaults to cwd. */
