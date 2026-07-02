@@ -6,6 +6,7 @@ import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
 import type { WizardOptions } from './config.js';
 import { WIZARD_VERSION } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
+import { showLogo } from './logo.js';
 import { buildInstallPrompt } from './prompt/build.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { Telemetry } from './telemetry.js';
@@ -13,6 +14,7 @@ import { Telemetry } from './telemetry.js';
 export async function runWizard(options: WizardOptions): Promise<number> {
   const telemetry = new Telemetry(options.telemetry, options.debug);
 
+  await showLogo();
   p.intro(`${pc.bgCyan(pc.black(' Subtext '))} setup ${pc.dim(`v${WIZARD_VERSION}`)}`);
   p.log.message(
     'This installer sets up Subtext session capture in your app using your own coding agent.',
