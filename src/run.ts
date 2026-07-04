@@ -8,6 +8,7 @@ import { WIZARD_VERSION } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
 import { showLogo } from './logo.js';
 import { buildInstallPrompt } from './prompt/build.js';
+import { offerPromptReview } from './promptReview.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { Telemetry } from './telemetry.js';
 
@@ -74,7 +75,27 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       return 0;
     }
 
-    // 6. Hand off to the agent.
+    // 6. Offer to show the prompt before anything runs — it's what the agent
+    //    will actually execute, so the user gets to read it first. A
+    //    pre-selected --agent implies "just run it", matching the old
+    //    confirmation bypass.
+    if (!options.agent) {
+      const proceedLabel =
+        chosen === MANUAL_CHOICE
+          ? 'Copy the prompt to my clipboard'
+          : isTerminalRun
+            ? `Run the install now with ${chosen.definition.name}`
+            : `Open ${chosen.definition.name} with the install prompt`;
+      const { reviewed } = await offerPromptReview(prompt, {
+        proceedLabel,
+        proceedHint: isTerminalRun ? `edits files in ${options.dir}, auto-accepting` : undefined,
+      });
+      if (reviewed) {
+        telemetry.capture('prompt_reviewed');
+      }
+    }
+
+    // 7. Hand off to the agent.
     if (chosen === MANUAL_CHOICE) {
       let copied = true;
       try {
@@ -102,15 +123,6 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       agent: chosen.definition.id,
       kind: chosen.definition.kind,
     });
-
-    if (isTerminalRun) {
-      const confirmed = options.agent
-        ? true
-        : await p.confirm({
-            message: `Run the install now with ${chosen.definition.name}? It will edit files in ${options.dir} (auto-accepting edits).`,
-          });
-      if (p.isCancel(confirmed) || !confirmed) throw new CancelledError();
-    }
 
     const result = await chosen.definition.launch({
       prompt,
