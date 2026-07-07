@@ -2,6 +2,16 @@
   "name": "@subtext/install",
   "version": "0.1.0",
   "description": "Set up Subtext session capture in your app using your own coding agent",
+  "license": "MIT",
+  "homepage": "https://subtext.fullstory.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fullstorydev/subtext-wizard.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "keywords": [
     "subtext",
     "fullstory",
