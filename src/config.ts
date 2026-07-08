@@ -50,10 +50,12 @@ export const OAUTH_REGISTER_PATH = '/oauth/register';
 
 /**
  * Pre-registered Subtext OAuth client ids, per realm. Populate once the
- * Subtext client is registered in each realm's heimdall (required for the
- * Subtext-branded OAuth pages — heimdall keys branding off a stable
- * client_id; see mn PR cowpaths/mn#106970). Until then the wizard falls back
- * to RFC 7591 dynamic registration on each run.
+ * Subtext client is registered in each realm's heimdall — a stable
+ * first-party client avoids polluting the client table and hitting the
+ * registration rate limit with a fresh RFC 7591 registration on every run.
+ * Until then the wizard falls back to dynamic registration. (Branding does
+ * not depend on this: heimdall keys the Subtext-branded OAuth pages off the
+ * RFC 8707 resource indicator — see subtextOauthResource below.)
  */
 const PREREGISTERED_OAUTH_CLIENT_IDS: Partial<Record<Region, string>> = {
   // us: pending pre-registration
@@ -76,6 +78,17 @@ export function oauthClientId(region: Region): string | undefined {
  * tracked in the plan doc.
  */
 export const OAUTH_SCOPES = process.env.SUBTEXT_OAUTH_SCOPES ?? 'sessions:read';
+
+/**
+ * RFC 8707 resource indicator sent on the authorization and token requests,
+ * identifying the Subtext MCP resource. Heimdall keys the Subtext branding
+ * of its OAuth pages (login, consent) off this value's /mcp/subtext path —
+ * see mn PR cowpaths/mn#106970 — and MCP clients send the same indicator,
+ * so the wizard's login gets the same branded flow they do.
+ */
+export function subtextOauthResource(region: Region): string {
+  return `${apiBaseUrl(region)}/mcp/subtext`;
+}
 
 /** Public, unauthenticated snippet endpoint (snippet service). `type=CORE`
  * returns the full inline snippet body for a <script> tag. */
