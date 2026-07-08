@@ -27,19 +27,19 @@ Previously users copied a long setup prompt into their coding agent by hand. Thi
 
 Terminal agents get the **headless** prompt variant (approval gates replaced with "use best judgment + write `subtext-setup-report.md`"). App handoffs get the **interactive** variant, which keeps every plan/identity/privacy approval gate from the original onboarding prompt.
 
-6. **Plugin setup** — after the prompt run, the wizard writes the Subtext MCP server entry directly into the chosen harness's own config file (confirm-gated unless `--agent` was passed), pointing at the realm-aware `…/mcp/subtext` endpoint. No agent commands or slash commands involved. Project-scoped where supported, user-global otherwise:
+6. **Plugin setup** — after the prompt run, the wizard wires Subtext into the chosen harness (confirm-gated unless `--agent` was passed). The packaged **plugin is the primary route wherever one exists** — it bundles the skills (proof, review, live…) on top of the MCP server; harnesses without a plugin get the raw MCP server entry (tools only) written directly into their own config file, pointing at the realm-aware `…/mcp/subtext` endpoint:
 
-| Harness | File | Entry |
+| Harness | Primary | Fallback |
 |---|---|---|
-| Claude Code | `.mcp.json` (project) | `mcpServers.subtext` → `{type: http, url}` |
-| Cursor | `.cursor/mcp.json` (project) | `mcpServers.subtext` → `{url}` |
-| VS Code | `.vscode/mcp.json` (project) | `servers.subtext` → `{type: http, url}` |
-| Gemini CLI | `~/.gemini/settings.json` | `mcpServers.subtext` → `{httpUrl}` |
-| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers.subtext` → `{serverUrl}` |
-| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.subtext]` table appended |
-| Zed / Claude Desktop / manual | — | instructions only (no file we can safely edit) |
+| Claude Code | plugin CLI: `claude plugin marketplace add …/fullstorydev/subtext` + `claude plugin install subtext@subtext-marketplace` | write `.mcp.json` (project) |
+| Cursor | instructions: `/add-plugin subtext` (official plugin) | `.cursor/mcp.json` shown in the same note |
+| VS Code | write `.vscode/mcp.json` (project) `servers.subtext` → `{type: http, url}` | instructions |
+| Gemini CLI | write `~/.gemini/settings.json` `mcpServers.subtext` → `{httpUrl}` | instructions |
+| Windsurf | write `~/.codeium/windsurf/mcp_config.json` `mcpServers.subtext` → `{serverUrl}` | instructions |
+| Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` | instructions |
+| Zed / Claude Desktop / manual | instructions only | — |
 
-JSON configs are merged (existing keys preserved, idempotent on re-run); a file that fails to parse is never clobbered — the wizard falls back to printed instructions, which also mention the packaged plugin routes (`/plugin install subtext@subtext-marketplace` for Claude Code, `/add-plugin subtext` for Cursor) as alternatives. Skipped when the agent run exited non-zero.
+JSON config writes are merged (existing keys preserved, idempotent on re-run); a file that fails to parse is never clobbered — the wizard falls back to printed instructions. Skipped when the agent run exited non-zero.
 
 ## Telemetry
 

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
+import { runTerminalAgent } from './agents/helpers.js';
 import { MANUAL_CHOICE } from './agents/index.js';
 import type { DetectedAgent } from './agents/types.js';
 import type { Region, WizardOptions } from './config.js';
@@ -10,20 +11,24 @@ import { subtextMcpUrl } from './config.js';
 
 /**
  * Post-install plugin setup. Once the coding agent has run (or been handed)
- * the install prompt, wire the Subtext MCP server into that same harness so
- * it can review captured sessions in later conversations.
+ * the install prompt, wire Subtext into that same harness so it can review
+ * captured sessions in later conversations.
  *
- * The wizard writes the server entry straight into the harness's own MCP
- * config file — no agent commands, no slash commands to paste. Harnesses
- * without a file we can safely edit (Zed, Claude Desktop, unknown) get
- * instructions instead, as do declines and unparseable configs.
+ * The packaged plugin is preferred wherever one exists, because it bundles
+ * the skills (proof, review, live…) on top of the MCP server: Claude Code
+ * installs it via its plugin CLI, Cursor via the official /add-plugin.
+ * Harnesses without a plugin get the raw MCP server entry written straight
+ * into their own config file — tools only, no agent commands involved.
+ * Harnesses without a file we can safely edit (Zed, Claude Desktop,
+ * unknown) get instructions instead, as do declines and unparseable
+ * configs.
  */
 
 export const PLUGIN_MARKETPLACE_URL = 'https://github.com/fullstorydev/subtext';
 export const PLUGIN_SPEC = 'subtext@subtext-marketplace';
 
 const WHY_PLUGIN =
-  'The Subtext MCP server gives your coding agent tools to replay and review the sessions you just set up capturing.';
+  'The Subtext plugin gives your coding agent tools and skills to replay and review the sessions you just set up capturing.';
 
 /** The generic MCP server entry, for harnesses without a specific format. */
 export function manualMcpConfig(region: Region): string {
@@ -115,7 +120,9 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
  * The MCP config file each harness reads, in its own format. Project-scoped
  * where the harness supports it (the server rides along with the repo);
  * user-global otherwise. Returns null when there's no file we can safely
- * edit — those harnesses get instructions.
+ * edit — those harnesses get instructions. Cursor is deliberately absent:
+ * its packaged plugin (/add-plugin subtext) is the primary route, so it
+ * goes through instructions rather than a config write.
  */
 function configWrite(agentId: string, dir: string, region: Region): ConfigWrite | null {
   const url = subtextMcpUrl(region);
@@ -123,8 +130,6 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
   switch (agentId) {
     case 'claude-code':
       return jsonConfigWrite(path.join(dir, '.mcp.json'), 'mcpServers', { type: 'http', url });
-    case 'cursor':
-      return jsonConfigWrite(path.join(dir, '.cursor', 'mcp.json'), 'mcpServers', { url });
     case 'vscode':
       return jsonConfigWrite(path.join(dir, '.vscode', 'mcp.json'), 'servers', {
         type: 'http',
@@ -157,13 +162,19 @@ function pluginInstructions(agentId: string, region: Region): string[] {
   switch (agentId) {
     case 'claude-code':
       return [
-        `Add this to .mcp.json in the project (or run /plugin install ${PLUGIN_SPEC}`,
-        `after /plugin marketplace add ${PLUGIN_MARKETPLACE_URL}):`,
+        'In a Claude Code session, run (installs tools + skills):',
+        `  /plugin marketplace add ${PLUGIN_MARKETPLACE_URL}`,
+        `  /plugin install ${PLUGIN_SPEC}`,
+        '',
+        'Prefer a raw MCP server (tools only)? Add this to .mcp.json in the project:',
         ...indent(manualMcpConfig(region)),
       ];
     case 'cursor':
       return [
-        'Add this to .cursor/mcp.json in the project (or run /add-plugin subtext in Cursor):',
+        'In Cursor, run this in the agent pane (installs tools + skills):',
+        '  /add-plugin subtext',
+        '',
+        'Prefer a raw MCP server (tools only)? Add this to .cursor/mcp.json in the project:',
         ...indent(JSON.stringify({ mcpServers: { subtext: { url } } }, null, 2)),
       ];
     case 'claude-desktop':
@@ -198,12 +209,15 @@ function pluginInstructions(agentId: string, region: Region): string[] {
 /** Shown when the user took the raw prompt — we don't know their harness. */
 function manualChoiceInstructions(region: Region): string[] {
   return [
-    'Claude Code — add to .mcp.json in the project:',
+    'Claude Code — run in a session (installs tools + skills):',
+    `  /plugin marketplace add ${PLUGIN_MARKETPLACE_URL}`,
+    `  /plugin install ${PLUGIN_SPEC}`,
+    '',
+    'Cursor — run in the agent pane (installs tools + skills):',
+    '  /add-plugin subtext',
+    '',
+    'Any other MCP-capable agent — add this server config (tools only):',
     ...indent(manualMcpConfig(region)),
-    '',
-    'Cursor — the same entry in .cursor/mcp.json (or run /add-plugin subtext).',
-    '',
-    'Any other MCP-capable agent — the same server URL in its MCP settings.',
   ];
 }
 
@@ -212,9 +226,100 @@ function manualChoiceInstructions(region: Region): string[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Step 8 of the wizard, after the prompt run: wire the Subtext MCP server
- * into the harness that ran the install. Never throws — the install already
- * succeeded, so config trouble is reported and the wizard finishes cleanly.
+ * Run `claude plugin marketplace add` + `claude plugin install`. The
+ * marketplace add is soft-fail (it errors when the marketplace is already
+ * registered, e.g. on a re-run); the install itself decides success.
+ */
+async function installClaudeCodePlugin(binaryPath: string, cwd: string): Promise<boolean> {
+  const addExit = await runTerminalAgent({
+    binaryPath,
+    args: ['plugin', 'marketplace', 'add', PLUGIN_MARKETPLACE_URL],
+    cwd,
+    stdout: 'inherit',
+  });
+  if (addExit !== 0) {
+    p.log.info(pc.dim('Marketplace add failed — it may already be registered; continuing.'));
+  }
+  const installExit = await runTerminalAgent({
+    binaryPath,
+    args: ['plugin', 'install', PLUGIN_SPEC],
+    cwd,
+    stdout: 'inherit',
+  });
+  return installExit === 0;
+}
+
+/**
+ * Claude Code path: the packaged plugin first — it carries the skills, not
+ * just the MCP tools — and the raw .mcp.json entry only if that fails.
+ */
+async function claudeCodePluginSetup(
+  chosen: DetectedAgent,
+  options: WizardOptions,
+  onEvent: (event: string, properties?: Record<string, unknown>) => void,
+): Promise<void> {
+  let install = true;
+  if (!options.agent) {
+    const answer = await p.confirm({
+      message: `Install the Subtext plugin in Claude Code? ${pc.dim(
+        '(session-review tools plus the proof/review skills)',
+      )}`,
+    });
+    install = !p.isCancel(answer) && answer;
+  }
+  if (!install) {
+    onEvent('plugin_setup_declined', { agent: 'claude-code' });
+    p.note(pluginInstructions('claude-code', options.region).join('\n'), 'Install it later');
+    return;
+  }
+
+  if (options.mock) {
+    p.log.info(pc.dim('Mock mode: skipping the real plugin install.'));
+    onEvent('plugin_setup_completed', { agent: 'claude-code', method: 'mock' });
+    return;
+  }
+
+  p.log.step('Installing the Subtext plugin in Claude Code…');
+  let installed = false;
+  try {
+    installed = await installClaudeCodePlugin(chosen.binaryPath!, options.dir);
+  } catch {
+    // fall through to the raw MCP server entry
+  }
+  if (installed) {
+    onEvent('plugin_setup_completed', { agent: 'claude-code', method: 'plugin-cli' });
+    p.log.success(
+      'Subtext plugin installed — tools and skills are available in your next Claude Code session.',
+    );
+    return;
+  }
+
+  p.log.warn('Plugin install failed — falling back to a raw MCP server entry (tools only).');
+  const target = configWrite('claude-code', options.dir, options.region)!;
+  let outcome: WriteOutcome;
+  try {
+    outcome = await target.write();
+  } catch {
+    outcome = 'unparseable';
+  }
+  if (outcome === 'unparseable') {
+    onEvent('plugin_setup_failed', { agent: 'claude-code' });
+    p.note(pluginInstructions('claude-code', options.region).join('\n'), 'Add it by hand');
+    return;
+  }
+  onEvent('plugin_setup_completed', { agent: 'claude-code', method: 'config-write-fallback' });
+  p.log.success(
+    outcome === 'written'
+      ? `Subtext MCP server added to ${prettyPath(target.file)} — picked up the next time Claude Code starts here.`
+      : `Subtext MCP server already configured in ${prettyPath(target.file)}.`,
+  );
+}
+
+/**
+ * Step 8 of the wizard, after the prompt run: wire Subtext into the harness
+ * that ran the install — packaged plugin where one exists, raw MCP server
+ * entry otherwise. Never throws — the install already succeeded, so plugin
+ * trouble is reported and the wizard finishes cleanly.
  */
 export async function offerPluginSetup(
   chosen: DetectedAgent | typeof MANUAL_CHOICE,
@@ -224,15 +329,20 @@ export async function offerPluginSetup(
   const agentId = chosen === MANUAL_CHOICE ? MANUAL_CHOICE : chosen.definition.id;
   onEvent('plugin_setup_offered', { agent: agentId });
 
+  if (chosen !== MANUAL_CHOICE && agentId === 'claude-code' && chosen.binaryPath) {
+    await claudeCodePluginSetup(chosen, options, onEvent);
+    return;
+  }
+
   const target = configWrite(agentId, options.dir, options.region);
   if (!target) {
-    // Zed, Claude Desktop, manual: no file we can safely edit.
+    // Cursor (plugin route), Zed, Claude Desktop, manual.
     const lines =
       chosen === MANUAL_CHOICE
         ? manualChoiceInstructions(options.region)
         : pluginInstructions(agentId, options.region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'instructions' });
-    p.note([WHY_PLUGIN, '', ...lines].join('\n'), 'Add the Subtext MCP server');
+    p.note([WHY_PLUGIN, '', ...lines].join('\n'), 'Add the Subtext plugin');
     return;
   }
 
