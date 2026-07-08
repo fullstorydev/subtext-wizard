@@ -27,6 +27,8 @@ Previously users copied a long setup prompt into their coding agent by hand. Thi
 
 Terminal agents get the **headless** prompt variant (approval gates replaced with "use best judgment + write `subtext-setup-report.md`"). App handoffs get the **interactive** variant, which keeps every plan/identity/privacy approval gate from the original onboarding prompt.
 
+6. **Plugin setup** — after the prompt run, sets up the Subtext plugin in the same harness so the agent can review captured sessions later. Claude Code is installed automatically (`claude plugin marketplace add https://github.com/fullstorydev/subtext` + `claude plugin install subtext@subtext-marketplace`, confirm-gated unless `--agent` was passed); Cursor users are pointed at the official `/add-plugin subtext`; every other harness gets its own manual MCP server config pointing at the realm-aware `…/mcp/subtext` endpoint. Skipped when the agent run exited non-zero.
+
 ## Telemetry
 
 Two layers, both fire-and-forget and disabled by `--no-telemetry`:
@@ -86,5 +88,6 @@ src/snippet.ts                Org snippet fetch (public snippet service)
 src/integrations.ts           Integration catalog + multiselect
 src/prompt/build.ts           Prompt assembly (headless vs interactive variants)
 src/agents/                   Agent detection + launch strategies
+src/pluginSetup.ts            Post-run Subtext plugin / MCP server setup
 src/telemetry.ts              Fire-and-forget event reporting
 ```

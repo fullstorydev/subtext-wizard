@@ -66,6 +66,12 @@ export function oauthClientId(region: Region): string | undefined {
  */
 export const OAUTH_SCOPES = process.env.SUBTEXT_OAUTH_SCOPES ?? 'sessions:read';
 
+/** Subtext MCP server endpoint, realm-aware. This is the URL agents connect
+ * to once the plugin (or a manual MCP server entry) is configured. */
+export function subtextMcpUrl(region: Region): string {
+  return `${apiBaseUrl(region)}/mcp/subtext`;
+}
+
 /**
  * RFC 8707 resource indicator sent on the authorization and token requests,
  * identifying the Subtext MCP resource. Heimdall keys the Subtext branding
@@ -74,7 +80,7 @@ export const OAUTH_SCOPES = process.env.SUBTEXT_OAUTH_SCOPES ?? 'sessions:read';
  * so the wizard's login gets the same branded flow they do.
  */
 export function subtextOauthResource(region: Region): string {
-  return `${apiBaseUrl(region)}/mcp/subtext`;
+  return subtextMcpUrl(region);
 }
 
 /** Public, unauthenticated snippet endpoint (snippet service). `type=CORE`

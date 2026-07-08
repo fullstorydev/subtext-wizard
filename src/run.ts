@@ -7,6 +7,7 @@ import type { WizardOptions } from './config.js';
 import { WIZARD_VERSION } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
 import { showLogo } from './logo.js';
+import { offerPluginSetup } from './pluginSetup.js';
 import { buildInstallPrompt } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
 import { fetchCaptureSnippet } from './snippet.js';
@@ -114,6 +115,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         p.log.warn('Could not write to the clipboard — copy the prompt below.');
         console.log(`\n${prompt}\n`);
       }
+      // 8. Plugin setup — we don't know the harness, so show every path.
+      await offerPluginSetup(MANUAL_CHOICE, options, (event, properties) =>
+        telemetry.capture(event, properties),
+      );
       p.outro('Run this installer again any time with: npx @subtext/install');
       await telemetry.flush();
       return 0;
@@ -138,10 +143,19 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       exit_code: result.exitCode ?? null,
     });
 
+    // 8. Plugin setup — install the Subtext plugin in the harness that ran
+    //    (or will run) the prompt, so it can review sessions afterwards.
+    //    Skipped when the agent run failed: fix the install first.
     if (result.mode === 'handoff') {
       p.note(result.followUp?.join('\n') ?? '', 'Next steps');
+      await offerPluginSetup(chosen, options, (event, properties) =>
+        telemetry.capture(event, properties),
+      );
       p.outro('Finish the install in your agent — it will guide you from here.');
     } else if (result.exitCode === 0) {
+      await offerPluginSetup(chosen, options, (event, properties) =>
+        telemetry.capture(event, properties),
+      );
       p.outro(
         'Subtext install finished. Review the changes (and subtext-setup-report.md), then deploy to start capturing sessions.',
       );
