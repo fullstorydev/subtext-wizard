@@ -56,7 +56,7 @@ Auth and snippet use **real production endpoints** (audited against the `mn` mon
 - `https://api.fullstory.com/code/v2/snippet?org=…&type=CORE` — public org snippet (`api.eu1.…` for EU orgs)
 - `https://telemetry.subtext.fullstory.com/v1/wizard-events` — **PLACEHOLDER**, no backend yet
 
-Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBTEXT_TELEMETRY_URL`, `SUBTEXT_OAUTH_CLIENT_ID`, `SUBTEXT_OAUTH_SCOPES`). Use `--mock` to run the whole flow offline with canned auth and the example snippet. Remaining backend work (pre-registered OAuth client, scope decision, telemetry ingest, org-aware snippet for custom-host orgs) is itemized in `docs/notion-wizard-plan.md`.
+Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBTEXT_TELEMETRY_URL`, `SUBTEXT_OAUTH_CLIENT_ID`, `SUBTEXT_OAUTH_SCOPES`). Use `--mock` to run the whole flow offline with canned auth and the example snippet; it also skips the real agent run and plugin install (both logged instead), so the full flow — including the plugin step — can be previewed without side effects. Remaining backend work (pre-registered OAuth client, scope decision, telemetry ingest, org-aware snippet for custom-host orgs) is itemized in `docs/notion-wizard-plan.md`.
 
 ## Flags
 

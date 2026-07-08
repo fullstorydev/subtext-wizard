@@ -261,6 +261,8 @@ async function installClaudeCodePlugin(binaryPath: string, cwd: string): Promise
 interface PackagedPlugin {
   /** Confirm-prompt fragment describing what the install brings. */
   confirmHint: string;
+  /** The commands install() runs, for mock-mode display. */
+  commands: string[];
   /** Fast local check for an existing install, so re-runs don't fall back
    * into writing a duplicate raw server entry. */
   alreadyInstalled(): Promise<boolean>;
@@ -275,6 +277,10 @@ function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): Packaged
     case 'claude-code':
       return {
         confirmHint: 'session-review tools plus the proof/review skills',
+        commands: [
+          `claude plugin marketplace add ${PLUGIN_REPO_URL}`,
+          `claude plugin install ${PLUGIN_SPEC}`,
+        ],
         // No cheap local check; `plugin install` handles re-runs itself.
         alreadyInstalled: async () => false,
         install: () => installClaudeCodePlugin(binaryPath, options.dir),
@@ -282,6 +288,7 @@ function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): Packaged
     case 'gemini':
       return {
         confirmHint: 'installs the Subtext extension with its MCP servers',
+        commands: [`gemini extensions install ${PLUGIN_REPO_URL}`],
         alreadyInstalled: async () => {
           try {
             await fs.access(path.join(os.homedir(), '.gemini', 'extensions', 'subtext'));
@@ -363,7 +370,9 @@ async function packagedPluginSetup(
   }
 
   if (options.mock) {
-    p.log.info(pc.dim('Mock mode: skipping the real plugin install.'));
+    p.log.info(
+      pc.dim(`Mock mode: would run\n  ${plugin.commands.join('\n  ')}`),
+    );
     onEvent('plugin_setup_completed', { agent: agentId, method: 'mock' });
     return;
   }

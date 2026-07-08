@@ -3,6 +3,7 @@ import clipboard from 'clipboardy';
 import pc from 'picocolors';
 import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
+import type { LaunchResult } from './agents/types.js';
 import type { WizardOptions } from './config.js';
 import { WIZARD_VERSION } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
@@ -129,13 +130,28 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       kind: chosen.definition.kind,
     });
 
-    const result = await chosen.definition.launch({
-      prompt,
-      cwd: options.dir,
-      binaryPath: chosen.binaryPath,
-      debug: options.debug,
-      onEvent: (event, properties) => telemetry.capture(event, properties),
-    });
+    // Mock mode stops short of the real run — no agent launched, no app
+    // opened — but pretends it succeeded so the rest of the flow (plugin
+    // setup, outro) can be previewed.
+    let result: LaunchResult;
+    if (options.mock) {
+      p.log.warn(`Mock mode: skipping the real ${chosen.definition.name} run.`);
+      result =
+        chosen.definition.kind === 'terminal'
+          ? { mode: 'ran', exitCode: 0 }
+          : {
+              mode: 'handoff',
+              followUp: [`(mock) ${chosen.definition.name} would open with the prompt on your clipboard.`],
+            };
+    } else {
+      result = await chosen.definition.launch({
+        prompt,
+        cwd: options.dir,
+        binaryPath: chosen.binaryPath,
+        debug: options.debug,
+        onEvent: (event, properties) => telemetry.capture(event, properties),
+      });
+    }
 
     telemetry.capture('wizard_completed', {
       agent: chosen.definition.id,
