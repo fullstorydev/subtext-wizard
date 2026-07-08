@@ -15,16 +15,18 @@ import { subtextMcpUrl } from './config.js';
  * captured sessions in later conversations.
  *
  * The packaged plugin is preferred wherever one exists, because it bundles
- * the skills (proof, review, live…) on top of the MCP server: Claude Code
- * installs it via its plugin CLI, Cursor via the official /add-plugin.
- * Harnesses without a plugin get the raw MCP server entry written straight
- * into their own config file — tools only, no agent commands involved.
- * Harnesses without a file we can safely edit (Zed, Claude Desktop,
- * unknown) get instructions instead, as do declines and unparseable
- * configs.
+ * more than the MCP server (skills for Claude Code, both realm servers for
+ * Gemini): Claude Code and Gemini CLI install it via their own CLIs, Cursor
+ * via the official /add-plugin. Harnesses without a plugin get the raw MCP
+ * server entry written straight into their own config file — tools only,
+ * no agent commands involved. Harnesses without a file we can safely edit
+ * (Zed, Claude Desktop, unknown) get instructions instead, as do declines
+ * and unparseable configs.
  */
 
-export const PLUGIN_MARKETPLACE_URL = 'https://github.com/fullstorydev/subtext';
+/** The plugin repo: Claude Code marketplace and Gemini extension
+ * (gemini-extension.json) in one. */
+export const PLUGIN_REPO_URL = 'https://github.com/fullstorydev/subtext';
 export const PLUGIN_SPEC = 'subtext@subtext-marketplace';
 
 const WHY_PLUGIN =
@@ -122,7 +124,8 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
  * user-global otherwise. Returns null when there's no file we can safely
  * edit — those harnesses get instructions. Cursor is deliberately absent:
  * its packaged plugin (/add-plugin subtext) is the primary route, so it
- * goes through instructions rather than a config write.
+ * goes through instructions rather than a config write. Claude Code and
+ * Gemini entries are the fallbacks behind their packaged plugin installs.
  */
 function configWrite(agentId: string, dir: string, region: Region): ConfigWrite | null {
   const url = subtextMcpUrl(region);
@@ -156,14 +159,14 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
 // Instruction fallbacks
 // ---------------------------------------------------------------------------
 
-/** Harness-specific instructions for adding the server by hand. */
+/** Harness-specific instructions for adding the plugin/server by hand. */
 function pluginInstructions(agentId: string, region: Region): string[] {
   const url = subtextMcpUrl(region);
   switch (agentId) {
     case 'claude-code':
       return [
         'In a Claude Code session, run (installs tools + skills):',
-        `  /plugin marketplace add ${PLUGIN_MARKETPLACE_URL}`,
+        `  /plugin marketplace add ${PLUGIN_REPO_URL}`,
         `  /plugin install ${PLUGIN_SPEC}`,
         '',
         'Prefer a raw MCP server (tools only)? Add this to .mcp.json in the project:',
@@ -177,6 +180,14 @@ function pluginInstructions(agentId: string, region: Region): string[] {
         'Prefer a raw MCP server (tools only)? Add this to .cursor/mcp.json in the project:',
         ...indent(JSON.stringify({ mcpServers: { subtext: { url } } }, null, 2)),
       ];
+    case 'gemini':
+      return [
+        'Install the Subtext extension (bundles the MCP servers):',
+        `  gemini extensions install ${PLUGIN_REPO_URL}`,
+        '',
+        'Prefer a raw MCP server? Add this to ~/.gemini/settings.json:',
+        ...indent(JSON.stringify({ mcpServers: { subtext: { httpUrl: url } } }, null, 2)),
+      ];
     case 'claude-desktop':
       return [
         'In Claude Desktop: Settings → Connectors → Add custom connector,',
@@ -187,11 +198,6 @@ function pluginInstructions(agentId: string, region: Region): string[] {
         'Add the Subtext MCP server to ~/.codex/config.toml:',
         '  [mcp_servers.subtext]',
         `  url = "${url}"`,
-      ];
-    case 'gemini':
-      return [
-        'Add the Subtext MCP server to ~/.gemini/settings.json:',
-        ...indent(JSON.stringify({ mcpServers: { subtext: { httpUrl: url } } }, null, 2)),
       ];
     case 'vscode':
       return [
@@ -210,11 +216,14 @@ function pluginInstructions(agentId: string, region: Region): string[] {
 function manualChoiceInstructions(region: Region): string[] {
   return [
     'Claude Code — run in a session (installs tools + skills):',
-    `  /plugin marketplace add ${PLUGIN_MARKETPLACE_URL}`,
+    `  /plugin marketplace add ${PLUGIN_REPO_URL}`,
     `  /plugin install ${PLUGIN_SPEC}`,
     '',
     'Cursor — run in the agent pane (installs tools + skills):',
     '  /add-plugin subtext',
+    '',
+    'Gemini CLI — install the extension:',
+    `  gemini extensions install ${PLUGIN_REPO_URL}`,
     '',
     'Any other MCP-capable agent — add this server config (tools only):',
     ...indent(manualMcpConfig(region)),
@@ -222,7 +231,7 @@ function manualChoiceInstructions(region: Region): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// The wizard step
+// Packaged plugin installs
 // ---------------------------------------------------------------------------
 
 /**
@@ -233,7 +242,7 @@ function manualChoiceInstructions(region: Region): string[] {
 async function installClaudeCodePlugin(binaryPath: string, cwd: string): Promise<boolean> {
   const addExit = await runTerminalAgent({
     binaryPath,
-    args: ['plugin', 'marketplace', 'add', PLUGIN_MARKETPLACE_URL],
+    args: ['plugin', 'marketplace', 'add', PLUGIN_REPO_URL],
     cwd,
     stdout: 'inherit',
   });
@@ -249,53 +258,65 @@ async function installClaudeCodePlugin(binaryPath: string, cwd: string): Promise
   return installExit === 0;
 }
 
-/**
- * Claude Code path: the packaged plugin first — it carries the skills, not
- * just the MCP tools — and the raw .mcp.json entry only if that fails.
- */
-async function claudeCodePluginSetup(
-  chosen: DetectedAgent,
+interface PackagedPlugin {
+  /** Confirm-prompt fragment describing what the install brings. */
+  confirmHint: string;
+  /** Fast local check for an existing install, so re-runs don't fall back
+   * into writing a duplicate raw server entry. */
+  alreadyInstalled(): Promise<boolean>;
+  install(): Promise<boolean>;
+}
+
+/** The scriptable plugin install for this harness, if it has one. */
+function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): PackagedPlugin | null {
+  const { binaryPath } = chosen;
+  if (!binaryPath) return null;
+  switch (chosen.definition.id) {
+    case 'claude-code':
+      return {
+        confirmHint: 'session-review tools plus the proof/review skills',
+        // No cheap local check; `plugin install` handles re-runs itself.
+        alreadyInstalled: async () => false,
+        install: () => installClaudeCodePlugin(binaryPath, options.dir),
+      };
+    case 'gemini':
+      return {
+        confirmHint: 'installs the Subtext extension with its MCP servers',
+        alreadyInstalled: async () => {
+          try {
+            await fs.access(path.join(os.homedir(), '.gemini', 'extensions', 'subtext'));
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        install: async () =>
+          (await runTerminalAgent({
+            binaryPath,
+            args: ['extensions', 'install', PLUGIN_REPO_URL],
+            cwd: options.dir,
+            stdout: 'inherit',
+          })) === 0,
+      };
+    default:
+      return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// The wizard step
+// ---------------------------------------------------------------------------
+
+/** Write the raw server entry and report; instructions if the file resists. */
+async function applyConfigWrite(
+  target: ConfigWrite,
+  agentId: string,
+  agentName: string,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
+  method: string,
 ): Promise<void> {
-  let install = true;
-  if (!options.agent) {
-    const answer = await p.confirm({
-      message: `Install the Subtext plugin in Claude Code? ${pc.dim(
-        '(session-review tools plus the proof/review skills)',
-      )}`,
-    });
-    install = !p.isCancel(answer) && answer;
-  }
-  if (!install) {
-    onEvent('plugin_setup_declined', { agent: 'claude-code' });
-    p.note(pluginInstructions('claude-code', options.region).join('\n'), 'Install it later');
-    return;
-  }
-
-  if (options.mock) {
-    p.log.info(pc.dim('Mock mode: skipping the real plugin install.'));
-    onEvent('plugin_setup_completed', { agent: 'claude-code', method: 'mock' });
-    return;
-  }
-
-  p.log.step('Installing the Subtext plugin in Claude Code…');
-  let installed = false;
-  try {
-    installed = await installClaudeCodePlugin(chosen.binaryPath!, options.dir);
-  } catch {
-    // fall through to the raw MCP server entry
-  }
-  if (installed) {
-    onEvent('plugin_setup_completed', { agent: 'claude-code', method: 'plugin-cli' });
-    p.log.success(
-      'Subtext plugin installed — tools and skills are available in your next Claude Code session.',
-    );
-    return;
-  }
-
-  p.log.warn('Plugin install failed — falling back to a raw MCP server entry (tools only).');
-  const target = configWrite('claude-code', options.dir, options.region)!;
+  const shownPath = prettyPath(target.file);
   let outcome: WriteOutcome;
   try {
     outcome = await target.write();
@@ -303,16 +324,74 @@ async function claudeCodePluginSetup(
     outcome = 'unparseable';
   }
   if (outcome === 'unparseable') {
-    onEvent('plugin_setup_failed', { agent: 'claude-code' });
-    p.note(pluginInstructions('claude-code', options.region).join('\n'), 'Add it by hand');
+    onEvent('plugin_setup_failed', { agent: agentId });
+    p.log.warn(`Could not update ${shownPath} — it may have a format we can't merge safely.`);
+    p.note(pluginInstructions(agentId, options.region).join('\n'), 'Add it by hand');
     return;
   }
-  onEvent('plugin_setup_completed', { agent: 'claude-code', method: 'config-write-fallback' });
+  onEvent('plugin_setup_completed', { agent: agentId, method });
   p.log.success(
     outcome === 'written'
-      ? `Subtext MCP server added to ${prettyPath(target.file)} — picked up the next time Claude Code starts here.`
-      : `Subtext MCP server already configured in ${prettyPath(target.file)}.`,
+      ? `Subtext MCP server added to ${shownPath} — picked up the next time ${agentName} starts here.`
+      : `Subtext MCP server already configured in ${shownPath}.`,
   );
+}
+
+/** Packaged plugin path: install via the harness's own CLI, raw entry on failure. */
+async function packagedPluginSetup(
+  plugin: PackagedPlugin,
+  chosen: DetectedAgent,
+  options: WizardOptions,
+  onEvent: (event: string, properties?: Record<string, unknown>) => void,
+): Promise<void> {
+  const agentId = chosen.definition.id;
+  const agentName = chosen.definition.name;
+
+  // A pre-selected --agent means "just run it", same as the prompt-review
+  // bypass; otherwise ask before touching the user's harness config.
+  let install = true;
+  if (!options.agent) {
+    const answer = await p.confirm({
+      message: `Install the Subtext plugin in ${agentName}? ${pc.dim(`(${plugin.confirmHint})`)}`,
+    });
+    install = !p.isCancel(answer) && answer;
+  }
+  if (!install) {
+    onEvent('plugin_setup_declined', { agent: agentId });
+    p.note(pluginInstructions(agentId, options.region).join('\n'), 'Install it later');
+    return;
+  }
+
+  if (options.mock) {
+    p.log.info(pc.dim('Mock mode: skipping the real plugin install.'));
+    onEvent('plugin_setup_completed', { agent: agentId, method: 'mock' });
+    return;
+  }
+
+  if (await plugin.alreadyInstalled()) {
+    onEvent('plugin_setup_completed', { agent: agentId, method: 'already-installed' });
+    p.log.success(`Subtext plugin already installed in ${agentName}.`);
+    return;
+  }
+
+  p.log.step(`Installing the Subtext plugin in ${agentName}…`);
+  let installed = false;
+  try {
+    installed = await plugin.install();
+  } catch {
+    // fall through to the raw MCP server entry
+  }
+  if (installed) {
+    onEvent('plugin_setup_completed', { agent: agentId, method: 'plugin-cli' });
+    p.log.success(
+      `Subtext plugin installed — available in your next ${agentName} session.`,
+    );
+    return;
+  }
+
+  p.log.warn('Plugin install failed — falling back to a raw MCP server entry (tools only).');
+  const target = configWrite(agentId, options.dir, options.region)!;
+  await applyConfigWrite(target, agentId, agentName, options, onEvent, 'config-write-fallback');
 }
 
 /**
@@ -329,12 +408,16 @@ export async function offerPluginSetup(
   const agentId = chosen === MANUAL_CHOICE ? MANUAL_CHOICE : chosen.definition.id;
   onEvent('plugin_setup_offered', { agent: agentId });
 
-  if (chosen !== MANUAL_CHOICE && agentId === 'claude-code' && chosen.binaryPath) {
-    await claudeCodePluginSetup(chosen, options, onEvent);
-    return;
+  if (chosen !== MANUAL_CHOICE) {
+    const plugin = packagedPlugin(chosen, options);
+    if (plugin) {
+      await packagedPluginSetup(plugin, chosen, options, onEvent);
+      return;
+    }
   }
 
-  const target = configWrite(agentId, options.dir, options.region);
+  const target =
+    chosen === MANUAL_CHOICE ? null : configWrite(agentId, options.dir, options.region);
   if (!target) {
     // Cursor (plugin route), Zed, Claude Desktop, manual.
     const lines =
@@ -349,8 +432,6 @@ export async function offerPluginSetup(
   const agentName = chosen === MANUAL_CHOICE ? 'your agent' : chosen.definition.name;
   const shownPath = prettyPath(target.file);
 
-  // A pre-selected --agent means "just run it", same as the prompt-review
-  // bypass; otherwise ask before touching a config file.
   let proceed = true;
   if (!options.agent) {
     const answer = await p.confirm({
@@ -372,24 +453,5 @@ export async function offerPluginSetup(
     return;
   }
 
-  let outcome: WriteOutcome;
-  try {
-    outcome = await target.write();
-  } catch {
-    outcome = 'unparseable';
-  }
-
-  if (outcome === 'unparseable') {
-    onEvent('plugin_setup_failed', { agent: agentId });
-    p.log.warn(`Could not update ${shownPath} — it may have a format we can't merge safely.`);
-    p.note(pluginInstructions(agentId, options.region).join('\n'), 'Add it by hand');
-    return;
-  }
-
-  onEvent('plugin_setup_completed', { agent: agentId, method: 'config-write' });
-  p.log.success(
-    outcome === 'written'
-      ? `Subtext MCP server added to ${shownPath} — picked up the next time ${agentName} starts here.`
-      : `Subtext MCP server already configured in ${shownPath}.`,
-  );
+  await applyConfigWrite(target, agentId, agentName, options, onEvent, 'config-write');
 }

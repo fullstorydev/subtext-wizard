@@ -33,8 +33,8 @@ Terminal agents get the **headless** prompt variant (approval gates replaced wit
 |---|---|---|
 | Claude Code | plugin CLI: `claude plugin marketplace add …/fullstorydev/subtext` + `claude plugin install subtext@subtext-marketplace` | write `.mcp.json` (project) |
 | Cursor | instructions: `/add-plugin subtext` (official plugin) | `.cursor/mcp.json` shown in the same note |
+| Gemini CLI | extension CLI: `gemini extensions install …/fullstorydev/subtext` (repo carries `gemini-extension.json`; skips if `~/.gemini/extensions/subtext` exists) | write `~/.gemini/settings.json` `mcpServers.subtext` → `{httpUrl}` |
 | VS Code | write `.vscode/mcp.json` (project) `servers.subtext` → `{type: http, url}` | instructions |
-| Gemini CLI | write `~/.gemini/settings.json` `mcpServers.subtext` → `{httpUrl}` | instructions |
 | Windsurf | write `~/.codeium/windsurf/mcp_config.json` `mcpServers.subtext` → `{serverUrl}` | instructions |
 | Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` | instructions |
 | Zed / Claude Desktop / manual | instructions only | — |
