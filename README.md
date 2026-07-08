@@ -27,7 +27,19 @@ Previously users copied a long setup prompt into their coding agent by hand. Thi
 
 Terminal agents get the **headless** prompt variant (approval gates replaced with "use best judgment + write `subtext-setup-report.md`"). App handoffs get the **interactive** variant, which keeps every plan/identity/privacy approval gate from the original onboarding prompt.
 
-6. **Plugin setup** — after the prompt run, sets up the Subtext plugin in the same harness so the agent can review captured sessions later. Claude Code is installed automatically (`claude plugin marketplace add https://github.com/fullstorydev/subtext` + `claude plugin install subtext@subtext-marketplace`, confirm-gated unless `--agent` was passed); Cursor users are pointed at the official `/add-plugin subtext`; every other harness gets its own manual MCP server config pointing at the realm-aware `…/mcp/subtext` endpoint. Skipped when the agent run exited non-zero.
+6. **Plugin setup** — after the prompt run, the wizard writes the Subtext MCP server entry directly into the chosen harness's own config file (confirm-gated unless `--agent` was passed), pointing at the realm-aware `…/mcp/subtext` endpoint. No agent commands or slash commands involved. Project-scoped where supported, user-global otherwise:
+
+| Harness | File | Entry |
+|---|---|---|
+| Claude Code | `.mcp.json` (project) | `mcpServers.subtext` → `{type: http, url}` |
+| Cursor | `.cursor/mcp.json` (project) | `mcpServers.subtext` → `{url}` |
+| VS Code | `.vscode/mcp.json` (project) | `servers.subtext` → `{type: http, url}` |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers.subtext` → `{httpUrl}` |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers.subtext` → `{serverUrl}` |
+| Codex CLI | `~/.codex/config.toml` | `[mcp_servers.subtext]` table appended |
+| Zed / Claude Desktop / manual | — | instructions only (no file we can safely edit) |
+
+JSON configs are merged (existing keys preserved, idempotent on re-run); a file that fails to parse is never clobbered — the wizard falls back to printed instructions, which also mention the packaged plugin routes (`/plugin install subtext@subtext-marketplace` for Claude Code, `/add-plugin subtext` for Cursor) as alternatives. Skipped when the agent run exited non-zero.
 
 ## Telemetry
 
