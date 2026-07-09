@@ -9,8 +9,7 @@
     "url": "https://github.com/fullstorydev/subtext-wizard.git"
   },
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "keywords": [
     "subtext",
