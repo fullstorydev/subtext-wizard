@@ -39,3 +39,9 @@ jobs:
 
       - name: Publish npm package
         run: npm publish --access public
+        env:
+          # TEMPORARY: bootstrap token for the very first publish, before the package
+          # exists on npm and trusted publishing (OIDC) can be configured. Once trusted
+          # publishing is set up on npmjs.com, delete this env block and the NPM_TOKEN
+          # secret — subsequent releases authenticate tokenlessly via id-token: write.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

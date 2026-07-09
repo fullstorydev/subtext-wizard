@@ -8,7 +8,7 @@ const HELP = `
 Subtext setup — install the Subtext capture snippet with your own coding agent.
 
 Usage:
-  npx @subtext/install [options]
+  npx @subtextdev/subtext-wizard [options]
 
 Options:
   --dir <path>            App directory to instrument (default: current directory)

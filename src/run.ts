@@ -91,7 +91,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         p.log.warn('Could not write to the clipboard — copy the prompt below.');
         console.log(`\n${prompt}\n`);
       }
-      p.outro('Run this installer again any time with: npx @subtext/install');
+      p.outro('Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
       return 0;
     }

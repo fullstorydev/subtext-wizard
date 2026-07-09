@@ -1,5 +1,5 @@
 {
-  "name": "@subtext/install",
+  "name": "@subtextdev/subtext-wizard",
   "version": "0.1.0",
   "description": "Set up Subtext session capture in your app using your own coding agent",
   "license": "MIT",
@@ -14,7 +14,8 @@
   "keywords": [
     "subtext",
     "fullstory",
-    "session-capture",
+    "session-replay",
+    "agentic-session-review",
     "setup",
     "install",
     "wizard",

@@ -164,7 +164,7 @@ async function registerClient(authBase: string): Promise<string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      client_name: 'Subtext Install (npx @subtext/install)',
+      client_name: 'Subtext Install (npx @subtextdev/subtext-wizard)',
       redirect_uris: ['http://127.0.0.1/callback'],
       grant_types: ['authorization_code', 'refresh_token'],
       response_types: ['code'],

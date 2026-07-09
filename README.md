@@ -1,9 +1,9 @@
-# @subtext/install
+# @subtextdev/subtext-wizard
 
 One-command onboarding for Subtext session capture:
 
 ```sh
-npx @subtext/install
+npx @subtextdev/subtext-wizard
 ```
 
 Previously users copied a long setup prompt into their coding agent by hand. This CLI replaces that: it authenticates the user, fetches their org-specific capture snippet, asks which analytics tools to integrate with, then hands the install to **the user's own coding agent** — we never bundle or provide one.
