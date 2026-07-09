@@ -7,7 +7,7 @@
  * see docs/notion-wizard-plan.md for the build-out plan.
  */
 
-export const WIZARD_VERSION = '0.1.0';
+export const WIZARD_VERSION = '0.1.1';
 
 export type Region = 'us' | 'eu';
 
