@@ -36,13 +36,13 @@ Two layers, both fire-and-forget and disabled by `--no-telemetry`:
 
 ## Endpoints
 
-Auth and snippet use **real production endpoints** (audited against the `mn` monorepo — see `docs/notion-wizard-plan.md` for the full audit):
+Auth and snippet use **real production endpoints**:
 
 - `https://auth.fullstory.com/oauth/{register,authorize,token}` — OAuth 2.1, PKCE public client, loopback redirect
 - `https://api.fullstory.com/code/v2/snippet?org=…&type=CORE` — public org snippet (`api.eu1.…` for EU orgs)
 - `https://telemetry.subtext.fullstory.com/v1/wizard-events` — **PLACEHOLDER**, no backend yet
 
-Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBTEXT_TELEMETRY_URL`, `SUBTEXT_OAUTH_CLIENT_ID`, `SUBTEXT_OAUTH_SCOPES`). Use `--mock` to run the whole flow offline with canned auth and the example snippet. Remaining backend work (pre-registered OAuth client, scope decision, telemetry ingest, org-aware snippet for custom-host orgs) is itemized in `docs/notion-wizard-plan.md`.
+Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBTEXT_TELEMETRY_URL`, `SUBTEXT_OAUTH_CLIENT_ID`, `SUBTEXT_OAUTH_SCOPES`). Use `--mock` to run the whole flow offline with canned auth and the example snippet. Remaining backend work: pre-registered OAuth client, scope decision, telemetry ingest, org-aware snippet for custom-host orgs.
 
 ## Flags
 
@@ -78,7 +78,6 @@ Layout:
 ```
 templates/install-prompt.md   The onboarding prompt, with {{PLACEHOLDER}} slots
 templates/mock-snippet.html   Example snippet returned in --mock mode
-docs/notion-wizard-plan.md    Endpoint audit + backend build plan
 src/bin.ts                    CLI entry + arg parsing
 src/run.ts                    Wizard orchestration
 src/auth.ts                   OAuth PKCE + loopback browser login

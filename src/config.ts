@@ -3,8 +3,7 @@
  *
  * Auth and snippet endpoints are REAL production Fullstory endpoints
  * (verified against the mn monorepo: heimdall OAuth service and the public
- * snippet service). Anything still marked PLACEHOLDER has no backend yet —
- * see docs/notion-wizard-plan.md for the build-out plan.
+ * snippet service). Anything still marked PLACEHOLDER has no backend yet.
  */
 
 export const WIZARD_VERSION = '0.1.1';
