@@ -29,20 +29,25 @@ Terminal agents get the **headless** prompt variant (approval gates replaced wit
 
 ## Telemetry
 
-Two layers, both fire-and-forget and disabled by `--no-telemetry`:
+Consent-gated and fire-and-forget: after login the wizard asks whether it may collect telemetry about the install session (step progress, outcomes, and timings — never code or data). Declining, or passing `--no-telemetry`, disables everything below. Events are `WorkflowEvent` payloads (workflow `onboard`) POSTed to `/subtext/telemetry`, authenticated with the user's OAuth access token.
 
-- **CLI events** (`src/telemetry.ts`) — `wizard_started`, `auth_completed`, `integrations_selected`, `agents_detected`, `agent_launch_started`, `wizard_completed`, `wizard_error`, correlated by a per-run `run_id`.
-- **Agent-side checkpoints** — the prompt itself instructs the agent to `curl` a background ping after each install step, tagged with the same `run_id`, so progress is visible even during the agent-led portion.
+Two layers:
+
+- **CLI events** (`src/telemetry.ts`) — a `start` event when a terminal or manual run reaches handoff (harness, time-to-handoff), plus a `fail`/`skipped` outcome if the run errors, is cancelled, or a terminal agent exits nonzero.
+- **Agent-side checkpoints** — the prompt instructs the agent to report each install step (`precheck` → `complete`) as it finishes; `analytics_providers` reflects what the agent actually detects, not the user's picker selection. Two variants:
+  - *Terminal runs* `curl` the endpoint directly, authenticated via a `SUBTEXT_TELEMETRY_TOKEN` env var the wizard sets on the child process.
+  - *GUI handoffs* log through the Subtext plugin's `telemetry-event` MCP tool — the wizard walks the user through installing the plugin (fullstorydev/subtext) before opening the app — and the agent logs its own `start` event with harness/model.
+  - *Manual handoffs* get no checkpoints: embedding the user's token in a clipboard prompt isn't safe, and there's no known agent to hold the plugin.
 
 ## Endpoints
 
-Auth and snippet use **real production endpoints**:
+Auth, snippet, and telemetry use **real production endpoints**:
 
 - `https://auth.fullstory.com/oauth/{register,authorize,token}` — OAuth 2.1, PKCE public client, loopback redirect
 - `https://api.fullstory.com/code/v2/snippet?org=…&type=CORE` — public org snippet (`api.eu1.…` for EU orgs)
-- `https://telemetry.subtext.fullstory.com/v1/wizard-events` — **PLACEHOLDER**, no backend yet
+- `https://api.fullstory.com/subtext/telemetry` — workflow-event ingest (Bearer auth, realm-aware)
 
-Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBTEXT_TELEMETRY_URL`, `SUBTEXT_OAUTH_CLIENT_ID`, `SUBTEXT_OAUTH_SCOPES`). Use `--mock` to run the whole flow offline with canned auth and the example snippet. Remaining backend work: pre-registered OAuth client, scope decision, telemetry ingest, org-aware snippet for custom-host orgs.
+Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBTEXT_TELEMETRY_URL`, `SUBTEXT_OAUTH_CLIENT_ID`, `SUBTEXT_OAUTH_SCOPES`). Use `--mock` to run the whole flow offline with canned auth and the example snippet. Remaining backend work: pre-registered OAuth client, scope decision, org-aware snippet for custom-host orgs.
 
 ## Flags
 

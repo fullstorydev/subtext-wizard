@@ -74,6 +74,8 @@ export function runTerminalAgent(opts: {
   args: string[];
   cwd: string;
   promptOnStdin?: string;
+  /** Extra environment variables merged over the wizard's own. */
+  env?: Record<string, string>;
   /** 'inherit' streams the agent's own output; 'pipe' lets the caller parse it. */
   stdout?: 'inherit' | 'pipe';
   onStdoutLine?: (line: string) => void;
@@ -81,6 +83,7 @@ export function runTerminalAgent(opts: {
   return new Promise((resolve, reject) => {
     const child = spawn(opts.binaryPath, opts.args, {
       cwd: opts.cwd,
+      env: opts.env ? { ...process.env, ...opts.env } : undefined,
       stdio: [
         opts.promptOnStdin !== undefined ? 'pipe' : 'inherit',
         opts.stdout ?? 'inherit',

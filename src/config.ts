@@ -6,7 +6,7 @@
  * snippet service). Anything still marked PLACEHOLDER has no backend yet.
  */
 
-export const WIZARD_VERSION = '0.1.1';
+export const WIZARD_VERSION = '0.1.2';
 
 export type Region = 'us' | 'eu';
 
@@ -53,11 +53,17 @@ export const OAUTH_SCOPES = process.env.SUBTEXT_OAUTH_SCOPES ?? 'sessions:read';
  * returns the full inline snippet body for a <script> tag. */
 export const SNIPPET_PATH = '/code/v2/snippet';
 
-/** Telemetry ingestion endpoint, fire-and-forget. PLACEHOLDER — no backend
- * exists yet; see plan doc. */
-export const TELEMETRY_ENDPOINT =
-  process.env.SUBTEXT_TELEMETRY_URL ??
-  'https://telemetry.subtext.fullstory.com/v1/wizard-events';
+/**
+ * Telemetry ingestion endpoint (lidar, fronted by gangplank). Accepts a
+ * protojson `WorkflowEvent` and requires an authenticated session — we send
+ * the user's OAuth access token as `Authorization: Bearer`.
+ */
+export const TELEMETRY_PATH = '/subtext/telemetry';
+
+export function telemetryUrl(region: Region): string {
+  if (process.env.SUBTEXT_TELEMETRY_URL) return process.env.SUBTEXT_TELEMETRY_URL;
+  return `${apiBaseUrl(region)}${TELEMETRY_PATH}`;
+}
 
 export const AUTH_CALLBACK_TIMEOUT_MS = 5 * 60_000;
 

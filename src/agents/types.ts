@@ -14,6 +14,9 @@ export interface LaunchContext {
   cwd: string;
   binaryPath?: string;
   debug: boolean;
+  /** Extra environment for terminal launches (e.g. the telemetry token the
+   * prompt's checkpoint curls authenticate with). */
+  env?: Record<string, string>;
   onEvent?: (event: string, properties?: Record<string, unknown>) => void;
 }
 

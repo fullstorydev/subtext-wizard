@@ -12,6 +12,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
     binaryPath: ctx.binaryPath!,
     args: ['--yolo', '-p', ctx.prompt],
     cwd: ctx.cwd,
+    env: ctx.env,
     stdout: 'inherit',
   });
   return { mode: 'ran', exitCode };

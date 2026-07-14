@@ -1,19 +1,28 @@
 import fs from 'node:fs';
-import { TELEMETRY_ENDPOINT } from '../config.js';
 import type { IntegrationSelection } from '../integrations.js';
 import { packageRootPath } from '../paths.js';
 
 export type PromptMode = 'headless' | 'interactive';
+
+/**
+ * How the prompt instructs the agent to report telemetry:
+ * - 'curl'  — headless terminal runs; the wizard hands the agent an auth
+ *   token via env and it POSTs WorkflowEvents directly.
+ * - 'mcp'   — GUI handoffs, where the wizard just guided the Subtext plugin
+ *   setup; the agent logs through the `telemetry-event` MCP tool.
+ * - 'none'  — telemetry declined/disabled, or an unknown agent (manual
+ *   handoff) with no safe way to authenticate.
+ */
+export type PromptTelemetry = 'curl' | 'mcp' | 'none';
 
 export interface BuildPromptInput {
   /** Org-specific capture snippet HTML fetched from the API. */
   snippet: string;
   selection: IntegrationSelection;
   mode: PromptMode;
-  /** Correlates agent-side telemetry with this wizard run. */
-  runId: string;
-  /** Telemetry checkpoints from inside the agent run. Off when telemetry is disabled. */
-  telemetryEnabled: boolean;
+  telemetry: PromptTelemetry;
+  /** Realm-aware /subtext/telemetry endpoint the curl checkpoints POST to. */
+  telemetryUrl: string;
 }
 
 const HEADLESS_MODE_SECTION = `## Mode: autonomous (headless)
@@ -24,19 +33,60 @@ const INTERACTIVE_MODE_SECTION = `## Mode: interactive
 
 Work through the steps with the user in this conversation, honoring every approval gate below.`;
 
-function telemetrySection(runId: string): string {
+/**
+ * GUI-handoff variant: the agent logs milestones through the Subtext
+ * plugin's `telemetry-event` MCP tool. Adapted from the settings-ui setup
+ * prompt (mn#107606), minus the consent ask — the wizard already asked in
+ * the CLI, and this section only renders when the user said yes.
+ */
+function mcpTelemetrySection(): string {
+  return `## Telemetry
+
+The user already agreed, during Subtext setup, that this install may log anonymous progress telemetry — step outcomes and timings, never code or data. Do not ask again. Log it with the \`telemetry-event\` MCP tool from the Subtext plugin (documented in the \`subtext-telemetry\` skill).
+
+Log one event before Step 1 — \`workflow="onboard" step="start"\` with \`harness\` (your coding tool) and \`model\` metadata — then one event as each of Steps 1–8 completes, with an \`outcome\` (\`success\`, \`partial\`, \`fail\`, or \`skipped\`) and that step's metadata fields:
+
+| After | Log step | Extra metadata |
+|-------|----------|----------------|
+| Step 1 | \`precheck\` | \`already_installed\` (bool) |
+| Step 2 | \`explore\` | \`framework\` (string), \`csp_present\` (bool) |
+| Step 3 | \`plan\` | \`approved\` (bool) |
+| Step 4 | \`install\` | \`framework\` (string), \`csp_modified\` (bool) |
+| Step 5 | \`identify\` | \`identity_added\` (bool) |
+| Step 6 | \`link_analytics\` | \`analytics_providers\` (string[] — names of every analytics/session-replay/error-monitoring/feature-flag SDK found) |
+| Step 7 | \`mask_pii\` | \`masked_count\` (int), \`privacy_check\` (bool) |
+| Step 8 | \`complete\` | \`total_duration_ms\` (int), \`total_tokens\` (int) |
+
+Every event's metadata may also include \`duration_ms\` (int) and \`tokens\` (int) for that step when you can estimate them. Log each event at the moment the step finishes — not retroactively at the end — so durations and failure points are real. Metadata is a JSON object containing only these derived fields: never include file contents, code, secrets, or user data. Telemetry is fire-and-forget: if the tool is unavailable (e.g. the plugin isn't installed) or a call returns \`{"logged": false}\`, skip it silently and keep working — never block, retry, or abort the install because of telemetry. Do not announce telemetry calls to the user or mention them in your summaries.`;
+}
+
+function curlTelemetrySection(telemetryUrl: string): string {
   return `## Telemetry checkpoints
 
-As you finish each step below, fire a non-blocking background telemetry ping so setup progress is visible to the Subtext team:
+As you finish each step below, fire a non-blocking background telemetry ping so setup progress is visible to the Subtext team. The \`SUBTEXT_TELEMETRY_TOKEN\` environment variable is already set in your environment:
 
 \`\`\`sh
-curl -s -X POST '${TELEMETRY_ENDPOINT}' \\
+curl -s -X POST '${telemetryUrl}' \\
+  -H "Authorization: Bearer $SUBTEXT_TELEMETRY_TOKEN" \\
   -H 'Content-Type: application/json' \\
-  -d '{"event":"agent_step_completed","run_id":"${runId}","step":"<step number, 1-8>"}' \\
+  -d '{"workflow":"onboard","step":"<step>","outcome":"<outcome>","metadata":<metadata>}' \\
   > /dev/null 2>&1 &
 \`\`\`
 
-Fire one after each of Steps 1–8. Telemetry must never block or delay the install — if \`curl\` is unavailable or the request fails, skip silently and move on.`;
+Fire one after each of Steps 1–8, with \`step\` and \`metadata\` per this table. \`outcome\` is \`success\`, \`partial\`, \`fail\`, or \`skipped\`, describing how that step went. In \`metadata\`, omit any field you don't know, and always include \`"durationMs"\` (wall-clock milliseconds you spent on the step) when you can estimate it.
+
+| After  | \`step\` | \`metadata\` fields |
+|--------|----------|--------------------|
+| Step 1 | \`precheck\` | \`"alreadyInstalled"\` (bool) |
+| Step 2 | \`explore\` | \`"framework"\` (e.g. "next"), \`"cspPresent"\` (bool) |
+| Step 3 | \`plan\` | \`"approved"\` (bool) |
+| Step 4 | \`install\` | \`"cspModified"\` (bool) |
+| Step 5 | \`identify\` | \`"identityAdded"\` (bool) |
+| Step 6 | \`link_analytics\` | \`"analyticsProviders"\` (array of SDK names found) |
+| Step 7 | \`mask_pii\` | \`"maskedCount"\` (number), \`"privacyCheck"\` (bool) |
+| Step 8 | \`complete\` | \`"totalDurationMs"\`, \`"totalTokens"\` (whole-flow totals) |
+
+Telemetry must never block or delay the install — if \`curl\` is unavailable, the variable is empty, or the request fails, skip silently and move on.`;
 }
 
 function integrationsSection(selection: IntegrationSelection): string {
@@ -96,7 +146,12 @@ export function buildInstallPrompt(input: BuildPromptInput): string {
 
   const replacements: Record<string, string> = {
     MODE_SECTION: headless ? HEADLESS_MODE_SECTION : INTERACTIVE_MODE_SECTION,
-    TELEMETRY_SECTION: input.telemetryEnabled ? telemetrySection(input.runId) : '',
+    TELEMETRY_SECTION:
+      input.telemetry === 'curl'
+        ? curlTelemetrySection(input.telemetryUrl)
+        : input.telemetry === 'mcp'
+          ? mcpTelemetrySection()
+          : '',
     INTEGRATIONS_SECTION: integrationsSection(input.selection),
     SNIPPET: input.snippet,
     INTEGRATION_LINKAGE_EXAMPLES: linkageExamples(input.selection),

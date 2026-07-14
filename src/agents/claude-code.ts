@@ -67,6 +67,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
     ],
     cwd: ctx.cwd,
     promptOnStdin: ctx.prompt,
+    env: ctx.env,
     stdout: 'pipe',
     onStdoutLine: (line) => {
       let event: StreamEvent;
