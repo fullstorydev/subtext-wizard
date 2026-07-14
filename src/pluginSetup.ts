@@ -92,8 +92,18 @@ function jsonConfigWrite(
       }
       if (config[section] != null && !isPlainObject(config[section])) return 'unparseable';
       const servers = (config[section] ??= {}) as JsonObject;
-      if (JSON.stringify(servers.subtext) === JSON.stringify(entry)) return 'unchanged';
-      servers.subtext = entry;
+      // Merge on top of an existing entry so user extras (headers, disabled,
+      // timeouts…) survive a re-run, but drop competing transport fields we
+      // aren't setting — e.g. a deprecated httpUrl next to the new url.
+      const merged: JsonObject = {
+        ...(isPlainObject(servers.subtext) ? servers.subtext : {}),
+        ...entry,
+      };
+      for (const key of ['url', 'httpUrl', 'serverUrl', 'type', 'transport', 'command', 'args']) {
+        if (!(key in entry)) delete merged[key];
+      }
+      if (JSON.stringify(servers.subtext) === JSON.stringify(merged)) return 'unchanged';
+      servers.subtext = merged;
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
       return 'written';
@@ -117,12 +127,15 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'unparseable';
       }
-      const header = '[mcp_servers.subtext]';
-      const headerAt = existing.indexOf(header);
-      if (headerAt >= 0) {
-        const tableStart = headerAt + header.length;
-        const nextTable = existing.indexOf('\n[', tableStart);
-        const tableEnd = nextTable === -1 ? existing.length : nextTable;
+      // Line-anchored so the header inside a comment or string doesn't count.
+      const headerRe = /^[ \t]*\[mcp_servers\.subtext\][ \t]*(?:#.*)?$/m;
+      const headerMatch = headerRe.exec(existing);
+      if (headerMatch) {
+        const tableStart = headerMatch.index + headerMatch[0].length;
+        const nextTableRe = /\n[ \t]*\[/g;
+        nextTableRe.lastIndex = tableStart;
+        const nextTable = nextTableRe.exec(existing);
+        const tableEnd = nextTable ? nextTable.index : existing.length;
         const table = existing.slice(tableStart, tableEnd);
         const urlLine = /^(\s*url\s*=\s*)"[^"]*"/m;
         if (!urlLine.test(table)) return 'unparseable';
@@ -137,7 +150,7 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
       }
       const block = `${existing && !existing.endsWith('\n') ? '\n' : ''}${
         existing ? '\n' : ''
-      }${header}\nurl = "${url}"\n`;
+      }[mcp_servers.subtext]\nurl = "${url}"\n`;
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, existing + block, 'utf8');
       return 'written';
@@ -440,8 +453,22 @@ async function packagedPluginSetup(
     return;
   }
 
-  p.log.warn('Plugin install failed — falling back to a raw MCP server entry (tools only).');
+  p.log.warn('Plugin install failed — a raw MCP server entry (tools only) can be added instead.');
   const target = configWrite(agentId, options.dir, region)!;
+  // The user approved the plugin install, not a config-file edit — ask
+  // again before touching a different file (same --agent bypass as above).
+  let fallback = true;
+  if (!options.agent) {
+    const answer = await p.confirm({
+      message: `Add the Subtext MCP server to ${prettyPath(target.file)} instead?`,
+    });
+    fallback = !p.isCancel(answer) && answer;
+  }
+  if (!fallback) {
+    onEvent('plugin_setup_declined', { agent: agentId });
+    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it later');
+    return;
+  }
   await applyConfigWrite(target, agentId, agentName, region, onEvent, 'config-write-fallback');
 }
 

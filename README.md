@@ -39,7 +39,7 @@ Terminal agents get the **headless** prompt variant (approval gates replaced wit
 | Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` (updates the `url` in an existing table) | instructions |
 | Zed / Claude Desktop / manual | instructions only | — |
 
-JSON config writes are merged (existing keys preserved, idempotent on re-run); a file that fails to parse — or whose root/section isn't a JSON object — is never clobbered: the wizard falls back to printed instructions. The realm in the MCP URL comes from the org's auth token, not the `--region` flag. Skipped when the agent run exited non-zero.
+JSON config writes are merged (sibling servers and extra fields on an existing `subtext` entry preserved, idempotent on re-run); a file that fails to parse — or whose root/section isn't a JSON object — is never clobbered: the wizard falls back to printed instructions. A failed packaged install asks again before falling back to a config write. The realm in the MCP URL comes from the org's auth token, not the `--region` flag. Skipped when the agent run exited non-zero.
 
 ## Telemetry
 
