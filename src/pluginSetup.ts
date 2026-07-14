@@ -103,7 +103,9 @@ function jsonConfigWrite(
 
 /**
  * Codex config is TOML, which we don't parse — append the server table if
- * it isn't there yet, and leave an existing one alone.
+ * it isn't there yet. When the table already exists, rewrite just its
+ * `url` line so a realm change on a re-run doesn't leave a stale host;
+ * a table we can't find the url in falls back to instructions.
  */
 function codexConfigWrite(file: string, url: string): ConfigWrite {
   return {
@@ -115,10 +117,27 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'unparseable';
       }
-      if (existing.includes('[mcp_servers.subtext]')) return 'unchanged';
+      const header = '[mcp_servers.subtext]';
+      const headerAt = existing.indexOf(header);
+      if (headerAt >= 0) {
+        const tableStart = headerAt + header.length;
+        const nextTable = existing.indexOf('\n[', tableStart);
+        const tableEnd = nextTable === -1 ? existing.length : nextTable;
+        const table = existing.slice(tableStart, tableEnd);
+        const urlLine = /^(\s*url\s*=\s*)"[^"]*"/m;
+        if (!urlLine.test(table)) return 'unparseable';
+        const updated = table.replace(urlLine, (_, prefix: string) => `${prefix}"${url}"`);
+        if (updated === table) return 'unchanged';
+        await fs.writeFile(
+          file,
+          existing.slice(0, tableStart) + updated + existing.slice(tableEnd),
+          'utf8',
+        );
+        return 'written';
+      }
       const block = `${existing && !existing.endsWith('\n') ? '\n' : ''}${
         existing ? '\n' : ''
-      }[mcp_servers.subtext]\nurl = "${url}"\n`;
+      }${header}\nurl = "${url}"\n`;
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, existing + block, 'utf8');
       return 'written';
@@ -147,8 +166,11 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
         url,
       });
     case 'gemini':
+      // `url` + explicit `type` is the consolidated schema (the old
+      // `httpUrl` field is deprecated, kept only as a compat fallback).
       return jsonConfigWrite(path.join(home, '.gemini', 'settings.json'), 'mcpServers', {
-        httpUrl: url,
+        url,
+        type: 'http',
       });
     case 'devin':
       // Cascade — the panel the handoff points at — kept Windsurf's config
@@ -197,7 +219,7 @@ function pluginInstructions(agentId: string, region: Region): string[] {
         `  gemini extensions install ${PLUGIN_REPO_URL}`,
         '',
         'Prefer a raw MCP server? Add this to ~/.gemini/settings.json:',
-        ...indent(JSON.stringify({ mcpServers: { subtext: { httpUrl: url } } }, null, 2)),
+        ...indent(JSON.stringify({ mcpServers: { subtext: { url, type: 'http' } } }, null, 2)),
       ];
     case 'devin':
       return [

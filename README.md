@@ -33,10 +33,10 @@ Terminal agents get the **headless** prompt variant (approval gates replaced wit
 |---|---|---|
 | Claude Code | plugin CLI: `claude plugin marketplace add …/fullstorydev/subtext` + `claude plugin install subtext@subtext-marketplace` | write `.mcp.json` (project) |
 | Cursor | instructions: `/add-plugin subtext` (official plugin) | `.cursor/mcp.json` shown in the same note |
-| Gemini CLI | extension CLI: `gemini extensions install …/fullstorydev/subtext` (repo carries `gemini-extension.json`; skips if `~/.gemini/extensions/subtext` exists) | write `~/.gemini/settings.json` `mcpServers.subtext` → `{httpUrl}` |
+| Gemini CLI | extension CLI: `gemini extensions install …/fullstorydev/subtext` (repo carries `gemini-extension.json`; skips if `~/.gemini/extensions/subtext` exists) | write `~/.gemini/settings.json` `mcpServers.subtext` → `{url, type: http}` |
 | VS Code | write `.vscode/mcp.json` (project) `servers.subtext` → `{type: http, url}` | instructions |
 | Devin Desktop | write `~/.codeium/windsurf/mcp_config.json` `mcpServers.subtext` → `{serverUrl}` (read by Cascade) | instructions (incl. `devin mcp add` for the Devin CLI harness) |
-| Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` | instructions |
+| Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` (updates the `url` in an existing table) | instructions |
 | Zed / Claude Desktop / manual | instructions only | — |
 
 JSON config writes are merged (existing keys preserved, idempotent on re-run); a file that fails to parse — or whose root/section isn't a JSON object — is never clobbered: the wizard falls back to printed instructions. The realm in the MCP URL comes from the org's auth token, not the `--region` flag. Skipped when the agent run exited non-zero.
