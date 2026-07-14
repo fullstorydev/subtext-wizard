@@ -410,6 +410,15 @@ async function packagedPluginSetup(
   const agentId = chosen.definition.id;
   const agentName = chosen.definition.name;
 
+  // Check for an existing install before asking anything — a re-run
+  // shouldn't prompt for (or count a decline against) a plugin that's
+  // already there. Skipped in mock mode, which never reads real state.
+  if (!options.mock && (await plugin.alreadyInstalled())) {
+    onEvent('plugin_setup_completed', { agent: agentId, method: 'already-installed' });
+    p.log.success(`Subtext plugin already installed in ${agentName}.`);
+    return;
+  }
+
   // A pre-selected --agent means "just run it", same as the prompt-review
   // bypass; otherwise ask before touching the user's harness config.
   let install = true;
@@ -430,12 +439,6 @@ async function packagedPluginSetup(
       pc.dim(`Mock mode: would run\n  ${plugin.commands.join('\n  ')}`),
     );
     onEvent('plugin_setup_completed', { agent: agentId, method: 'mock' });
-    return;
-  }
-
-  if (await plugin.alreadyInstalled()) {
-    onEvent('plugin_setup_completed', { agent: agentId, method: 'already-installed' });
-    p.log.success(`Subtext plugin already installed in ${agentName}.`);
     return;
   }
 
