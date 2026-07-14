@@ -35,7 +35,7 @@ Terminal agents get the **headless** prompt variant (approval gates replaced wit
 | Cursor | instructions: `/add-plugin subtext` (official plugin) | `.cursor/mcp.json` shown in the same note |
 | Gemini CLI | extension CLI: `gemini extensions install …/fullstorydev/subtext` (repo carries `gemini-extension.json`; skips if `~/.gemini/extensions/subtext` exists) | write `~/.gemini/settings.json` `mcpServers.subtext` → `{httpUrl}` |
 | VS Code | write `.vscode/mcp.json` (project) `servers.subtext` → `{type: http, url}` | instructions |
-| Devin Desktop | write `.devin/config.json` (project) `mcpServers.subtext` → `{url, transport: http}` | instructions (`devin mcp add`) |
+| Devin Desktop | write `~/.codeium/windsurf/mcp_config.json` `mcpServers.subtext` → `{serverUrl}` (read by Cascade) | instructions (incl. `devin mcp add` for the Devin CLI harness) |
 | Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` | instructions |
 | Zed / Claude Desktop / manual | instructions only | — |
 

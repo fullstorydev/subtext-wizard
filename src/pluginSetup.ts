@@ -151,12 +151,14 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
         httpUrl: url,
       });
     case 'devin':
-      // Read by the Devin harness (Devin Desktop's local agent and the
-      // Devin CLI); project-scoped so the server rides along with the repo.
-      return jsonConfigWrite(path.join(dir, '.devin', 'config.json'), 'mcpServers', {
-        url,
-        transport: 'http',
-      });
+      // Cascade — the panel the handoff points at — kept Windsurf's config
+      // file through the Devin rebrand; .devin/config.json is the separate
+      // Devin CLI harness (see pluginInstructions).
+      return jsonConfigWrite(
+        path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
+        'mcpServers',
+        { serverUrl: url },
+      );
     case 'codex':
       return codexConfigWrite(path.join(home, '.codex', 'config.toml'), url);
     default:
@@ -199,13 +201,11 @@ function pluginInstructions(agentId: string, region: Region): string[] {
       ];
     case 'devin':
       return [
-        'Add the Subtext MCP server with the Devin CLI:',
-        `  devin mcp add subtext ${url}`,
+        'Add this to ~/.codeium/windsurf/mcp_config.json (read by Cascade in Devin Desktop):',
+        ...indent(JSON.stringify({ mcpServers: { subtext: { serverUrl: url } } }, null, 2)),
         '',
-        'Or add this to .devin/config.json in this project:',
-        ...indent(
-          JSON.stringify({ mcpServers: { subtext: { url, transport: 'http' } } }, null, 2),
-        ),
+        'Using the Devin CLI harness instead? Run:',
+        `  devin mcp add subtext ${url}`,
       ];
     case 'claude-desktop':
       return [
