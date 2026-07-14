@@ -127,8 +127,9 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'unparseable';
       }
-      // Line-anchored so the header inside a comment or string doesn't count.
-      const headerRe = /^[ \t]*\[mcp_servers\.subtext\][ \t]*(?:#.*)?$/m;
+      // Line-anchored so the header inside a comment or string doesn't
+      // count; tolerates CRLF line endings.
+      const headerRe = /^[ \t]*\[mcp_servers\.subtext\][ \t]*(?:#.*)?\r?$/m;
       const headerMatch = headerRe.exec(existing);
       if (headerMatch) {
         const tableStart = headerMatch.index + headerMatch[0].length;
