@@ -2,7 +2,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { WizardOptions } from '../config.js';
 import { CancelledError } from '../integrations.js';
-import { claudeDesktop, cursor, vscode, windsurf, zed } from './apps.js';
+import { claudeDesktop, cursor, devin, vscode, zed } from './apps.js';
 import { claudeCode } from './claude-code.js';
 import { codexCli } from './codex.js';
 import { geminiCli } from './gemini.js';
@@ -14,7 +14,7 @@ export const AGENTS: AgentDefinition[] = [
   codexCli,
   geminiCli,
   cursor,
-  windsurf,
+  devin,
   vscode,
   zed,
   claudeDesktop,
@@ -45,7 +45,7 @@ export async function chooseAgent(
 
   if (detected.length === 0) {
     p.log.warn(
-      'No coding agent detected (looked for Claude Code, Codex CLI, Gemini CLI, Cursor, Windsurf, VS Code, Zed, Claude Desktop).',
+      'No coding agent detected (looked for Claude Code, Codex CLI, Gemini CLI, Cursor, Devin Desktop, VS Code, Zed, Claude Desktop).',
     );
     return MANUAL_CHOICE;
   }

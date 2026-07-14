@@ -72,7 +72,7 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
       accessToken: 'subtext_mock_token',
       orgId: 'o-1G1-na1',
       userEmail: 'demo@example.com',
-      region: 'us',
+      region: options.region,
     };
   }
 

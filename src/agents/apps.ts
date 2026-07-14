@@ -96,13 +96,15 @@ export const cursor = makeAppAgent({
   pasteHint: ['Open the agent pane (Cmd+I / Ctrl+I) and paste the prompt.'],
 });
 
-export const windsurf = makeAppAgent({
-  id: 'windsurf',
-  name: 'Windsurf',
-  cliCommand: 'windsurf',
-  macAppName: 'Windsurf',
+// Windsurf became Devin Desktop after Cognition's acquisition (June 2026):
+// same editor, `devin-desktop` shell command, Devin.app bundle on macOS.
+export const devin = makeAppAgent({
+  id: 'devin',
+  name: 'Devin Desktop',
+  cliCommand: 'devin-desktop',
+  macAppName: 'Devin',
   opensFolder: true,
-  pasteHint: ['Open Cascade (Cmd+L / Ctrl+L) and paste the prompt.'],
+  pasteHint: ['Open the agent panel (Cascade, Cmd+L / Ctrl+L) and paste the prompt.'],
 });
 
 export const vscode = makeAppAgent({

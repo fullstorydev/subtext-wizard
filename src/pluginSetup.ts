@@ -64,10 +64,15 @@ interface ConfigWrite {
 
 type JsonObject = Record<string, unknown>;
 
+function isPlainObject(value: unknown): value is JsonObject {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /**
  * Merge `{ [section]: { subtext: entry } }` into a JSON config file,
  * creating the file (and parent dirs) if needed. Never clobbers a file it
- * can't parse — JSONC configs with comments fall back to instructions.
+ * can't parse or merge into — JSONC configs with comments, or files where
+ * the root or section isn't an object, fall back to instructions.
  */
 function jsonConfigWrite(
   file: string,
@@ -79,10 +84,13 @@ function jsonConfigWrite(
     async write() {
       let config: JsonObject = {};
       try {
-        config = JSON.parse(await fs.readFile(file, 'utf8')) as JsonObject;
+        const parsed: unknown = JSON.parse(await fs.readFile(file, 'utf8'));
+        if (!isPlainObject(parsed)) return 'unparseable';
+        config = parsed;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return 'unparseable';
       }
+      if (config[section] != null && !isPlainObject(config[section])) return 'unparseable';
       const servers = (config[section] ??= {}) as JsonObject;
       if (JSON.stringify(servers.subtext) === JSON.stringify(entry)) return 'unchanged';
       servers.subtext = entry;
@@ -142,12 +150,13 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
       return jsonConfigWrite(path.join(home, '.gemini', 'settings.json'), 'mcpServers', {
         httpUrl: url,
       });
-    case 'windsurf':
-      return jsonConfigWrite(
-        path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
-        'mcpServers',
-        { serverUrl: url },
-      );
+    case 'devin':
+      // Read by the Devin harness (Devin Desktop's local agent and the
+      // Devin CLI); project-scoped so the server rides along with the repo.
+      return jsonConfigWrite(path.join(dir, '.devin', 'config.json'), 'mcpServers', {
+        url,
+        transport: 'http',
+      });
     case 'codex':
       return codexConfigWrite(path.join(home, '.codex', 'config.toml'), url);
     default:
@@ -187,6 +196,16 @@ function pluginInstructions(agentId: string, region: Region): string[] {
         '',
         'Prefer a raw MCP server? Add this to ~/.gemini/settings.json:',
         ...indent(JSON.stringify({ mcpServers: { subtext: { httpUrl: url } } }, null, 2)),
+      ];
+    case 'devin':
+      return [
+        'Add the Subtext MCP server with the Devin CLI:',
+        `  devin mcp add subtext ${url}`,
+        '',
+        'Or add this to .devin/config.json in this project:',
+        ...indent(
+          JSON.stringify({ mcpServers: { subtext: { url, transport: 'http' } } }, null, 2),
+        ),
       ];
     case 'claude-desktop':
       return [
@@ -319,7 +338,7 @@ async function applyConfigWrite(
   target: ConfigWrite,
   agentId: string,
   agentName: string,
-  options: WizardOptions,
+  region: Region,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
   method: string,
 ): Promise<void> {
@@ -333,7 +352,7 @@ async function applyConfigWrite(
   if (outcome === 'unparseable') {
     onEvent('plugin_setup_failed', { agent: agentId });
     p.log.warn(`Could not update ${shownPath} — it may have a format we can't merge safely.`);
-    p.note(pluginInstructions(agentId, options.region).join('\n'), 'Add it by hand');
+    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
     return;
   }
   onEvent('plugin_setup_completed', { agent: agentId, method });
@@ -348,6 +367,7 @@ async function applyConfigWrite(
 async function packagedPluginSetup(
   plugin: PackagedPlugin,
   chosen: DetectedAgent,
+  region: Region,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
 ): Promise<void> {
@@ -365,7 +385,7 @@ async function packagedPluginSetup(
   }
   if (!install) {
     onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, options.region).join('\n'), 'Install it later');
+    p.note(pluginInstructions(agentId, region).join('\n'), 'Install it later');
     return;
   }
 
@@ -399,18 +419,21 @@ async function packagedPluginSetup(
   }
 
   p.log.warn('Plugin install failed — falling back to a raw MCP server entry (tools only).');
-  const target = configWrite(agentId, options.dir, options.region)!;
-  await applyConfigWrite(target, agentId, agentName, options, onEvent, 'config-write-fallback');
+  const target = configWrite(agentId, options.dir, region)!;
+  await applyConfigWrite(target, agentId, agentName, region, onEvent, 'config-write-fallback');
 }
 
 /**
  * Step 8 of the wizard, after the prompt run: wire Subtext into the harness
  * that ran the install — packaged plugin where one exists, raw MCP server
- * entry otherwise. Never throws — the install already succeeded, so plugin
- * trouble is reported and the wizard finishes cleanly.
+ * entry otherwise. `region` is the org's resolved realm (from the auth
+ * token), not the CLI flag — the MCP URLs written here must match the org.
+ * Never throws — the install already succeeded, so plugin trouble is
+ * reported and the wizard finishes cleanly.
  */
 export async function offerPluginSetup(
   chosen: DetectedAgent | typeof MANUAL_CHOICE,
+  region: Region,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
 ): Promise<void> {
@@ -420,19 +443,18 @@ export async function offerPluginSetup(
   if (chosen !== MANUAL_CHOICE) {
     const plugin = packagedPlugin(chosen, options);
     if (plugin) {
-      await packagedPluginSetup(plugin, chosen, options, onEvent);
+      await packagedPluginSetup(plugin, chosen, region, options, onEvent);
       return;
     }
   }
 
-  const target =
-    chosen === MANUAL_CHOICE ? null : configWrite(agentId, options.dir, options.region);
+  const target = chosen === MANUAL_CHOICE ? null : configWrite(agentId, options.dir, region);
   if (!target) {
     // Cursor (plugin route), Zed, Claude Desktop, manual.
     const lines =
       chosen === MANUAL_CHOICE
-        ? manualChoiceInstructions(options.region)
-        : pluginInstructions(agentId, options.region);
+        ? manualChoiceInstructions(region)
+        : pluginInstructions(agentId, region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'instructions' });
     p.note([WHY_PLUGIN, '', ...lines].join('\n'), 'Add the Subtext plugin');
     return;
@@ -452,7 +474,7 @@ export async function offerPluginSetup(
   }
   if (!proceed) {
     onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, options.region).join('\n'), 'Add it later');
+    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it later');
     return;
   }
 
@@ -462,5 +484,5 @@ export async function offerPluginSetup(
     return;
   }
 
-  await applyConfigWrite(target, agentId, agentName, options, onEvent, 'config-write');
+  await applyConfigWrite(target, agentId, agentName, region, onEvent, 'config-write');
 }

@@ -15,7 +15,7 @@ Options:
   --region <us|eu>        Data region for login and API hosts (default: us)
   --api-key <key>         Skip the browser login and use this OAuth access token
   --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
-                          windsurf, vscode, zed, claude-desktop, manual)
+                          devin, vscode, zed, claude-desktop, manual)
   --integrations <list>   Comma-separated integrations to target, skips the picker
                           (posthog, amplitude, mixpanel, statsig, sentry, logrocket,
                           datadog, launchdarkly, growthbook, intercom, pendo, appcues,

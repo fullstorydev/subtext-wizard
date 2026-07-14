@@ -21,7 +21,7 @@ Previously users copied a long setup prompt into their coding agent by hand. Thi
 | Claude Code | terminal | Runs headless in the same terminal (`claude -p`, prompt on stdin, `--permission-mode acceptEdits`, streamed `stream-json` progress) |
 | Codex CLI | terminal | Runs headless (`codex exec --full-auto`) |
 | Gemini CLI | terminal | Runs headless (`gemini --yolo -p`) |
-| Cursor / Windsurf / VS Code / Zed | app | Copies the prompt to the clipboard, opens the app at the project folder, shows paste instructions |
+| Cursor / Devin Desktop / VS Code / Zed | app | Copies the prompt to the clipboard, opens the app at the project folder, shows paste instructions |
 | Claude Desktop | app | Copies the prompt, opens the app, shows paste instructions |
 | None detected | — | Copies the prompt to the clipboard / prints it |
 
@@ -35,11 +35,11 @@ Terminal agents get the **headless** prompt variant (approval gates replaced wit
 | Cursor | instructions: `/add-plugin subtext` (official plugin) | `.cursor/mcp.json` shown in the same note |
 | Gemini CLI | extension CLI: `gemini extensions install …/fullstorydev/subtext` (repo carries `gemini-extension.json`; skips if `~/.gemini/extensions/subtext` exists) | write `~/.gemini/settings.json` `mcpServers.subtext` → `{httpUrl}` |
 | VS Code | write `.vscode/mcp.json` (project) `servers.subtext` → `{type: http, url}` | instructions |
-| Windsurf | write `~/.codeium/windsurf/mcp_config.json` `mcpServers.subtext` → `{serverUrl}` | instructions |
+| Devin Desktop | write `.devin/config.json` (project) `mcpServers.subtext` → `{url, transport: http}` | instructions (`devin mcp add`) |
 | Codex CLI | append `[mcp_servers.subtext]` to `~/.codex/config.toml` | instructions |
 | Zed / Claude Desktop / manual | instructions only | — |
 
-JSON config writes are merged (existing keys preserved, idempotent on re-run); a file that fails to parse is never clobbered — the wizard falls back to printed instructions. Skipped when the agent run exited non-zero.
+JSON config writes are merged (existing keys preserved, idempotent on re-run); a file that fails to parse — or whose root/section isn't a JSON object — is never clobbered: the wizard falls back to printed instructions. The realm in the MCP URL comes from the org's auth token, not the `--region` flag. Skipped when the agent run exited non-zero.
 
 ## Telemetry
 
@@ -65,7 +65,7 @@ Overridable via env vars (`SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL`, `SUBT
 --region <us|eu>        Data region for login and API hosts (default: us)
 --api-key <key>         Skip browser login (OAuth access tokens only)
 --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
-                        windsurf, vscode, zed, claude-desktop, manual)
+                        devin, vscode, zed, claude-desktop, manual)
 --integrations <list>   Skip the multiselect (unknown names become "Other")
 --print-prompt          Print the assembled prompt instead of launching
 --mock                  No network calls

@@ -117,7 +117,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         console.log(`\n${prompt}\n`);
       }
       // 8. Plugin setup — we don't know the harness, so show every path.
-      await offerPluginSetup(MANUAL_CHOICE, options, (event, properties) =>
+      await offerPluginSetup(MANUAL_CHOICE, auth.region, options, (event, properties) =>
         telemetry.capture(event, properties),
       );
       p.outro('Run this installer again any time with: npx @subtext/install');
@@ -164,12 +164,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     //    Skipped when the agent run failed: fix the install first.
     if (result.mode === 'handoff') {
       p.note(result.followUp?.join('\n') ?? '', 'Next steps');
-      await offerPluginSetup(chosen, options, (event, properties) =>
+      await offerPluginSetup(chosen, auth.region, options, (event, properties) =>
         telemetry.capture(event, properties),
       );
       p.outro('Finish the install in your agent — it will guide you from here.');
     } else if (result.exitCode === 0) {
-      await offerPluginSetup(chosen, options, (event, properties) =>
+      await offerPluginSetup(chosen, auth.region, options, (event, properties) =>
         telemetry.capture(event, properties),
       );
       p.outro(
