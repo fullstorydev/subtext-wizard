@@ -61,6 +61,16 @@ interface ConfigWrite {
   /** Config file the server entry goes into. */
   file: string;
   write(): Promise<WriteOutcome>;
+  /** Remove a subtext entry this wizard previously wrote — recognized by
+   * its URL pointing at one of our realm endpoints, so a user's custom
+   * entry is left alone. Used when a packaged plugin supersedes a raw
+   * fallback entry from an earlier run. Returns whether it removed one. */
+  removeOurs?(): Promise<boolean>;
+}
+
+/** Both realm endpoints — used to recognize entries we wrote. */
+function subtextUrls(): string[] {
+  return [subtextMcpUrl('us'), subtextMcpUrl('eu')];
 }
 
 type JsonObject = Record<string, unknown>;
@@ -108,6 +118,26 @@ function jsonConfigWrite(
       await fs.mkdir(path.dirname(file), { recursive: true });
       await fs.writeFile(file, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
       return 'written';
+    },
+    async removeOurs() {
+      let config: JsonObject;
+      try {
+        const parsed: unknown = JSON.parse(await fs.readFile(file, 'utf8'));
+        if (!isPlainObject(parsed)) return false;
+        config = parsed;
+      } catch {
+        return false;
+      }
+      const servers = config[section];
+      if (!isPlainObject(servers) || !isPlainObject(servers.subtext)) return false;
+      const { url, httpUrl, serverUrl } = servers.subtext;
+      const endpoint = [url, httpUrl, serverUrl].find(
+        (v): v is string => typeof v === 'string',
+      );
+      if (!endpoint || !subtextUrls().includes(endpoint)) return false;
+      delete servers.subtext;
+      await fs.writeFile(file, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
+      return true;
     },
   };
 }
@@ -338,7 +368,9 @@ function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): Packaged
           `claude plugin install ${PLUGIN_SPEC}`,
         ],
         // `claude plugin install` records installs in installed_plugins.json,
-        // keyed by <plugin>@<marketplace> — the same spec we install.
+        // keyed by <plugin>@<marketplace> — the same spec we install. A
+        // user-scoped install applies everywhere; project/local ones only
+        // count when they're for the directory being instrumented.
         alreadyInstalled: async () => {
           try {
             const installed = JSON.parse(
@@ -347,8 +379,15 @@ function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): Packaged
                 'utf8',
               ),
             ) as { plugins?: Record<string, unknown> };
-            const entry = installed.plugins?.[PLUGIN_SPEC];
-            return Array.isArray(entry) && entry.length > 0;
+            const entries = installed.plugins?.[PLUGIN_SPEC];
+            if (!Array.isArray(entries)) return false;
+            return entries.some(
+              (entry) =>
+                isPlainObject(entry) &&
+                (entry.scope === 'user' ||
+                  (typeof entry.projectPath === 'string' &&
+                    path.resolve(entry.projectPath) === path.resolve(options.dir))),
+            );
           } catch {
             return false;
           }
@@ -414,6 +453,31 @@ async function applyConfigWrite(
   );
 }
 
+/**
+ * A working packaged plugin supersedes any raw fallback entry left by an
+ * earlier run — drop it so the harness doesn't load Subtext twice.
+ * Best-effort: only removes an entry whose URL is one of our endpoints.
+ */
+async function removeSupersededRawEntry(
+  agentId: string,
+  dir: string,
+  region: Region,
+): Promise<void> {
+  const target = configWrite(agentId, dir, region);
+  if (!target?.removeOurs) return;
+  try {
+    if (await target.removeOurs()) {
+      p.log.info(
+        pc.dim(
+          `Removed the raw MCP server entry from ${prettyPath(target.file)} — the plugin supersedes it.`,
+        ),
+      );
+    }
+  } catch {
+    // duplicate tools are annoying but not worth failing the step over
+  }
+}
+
 /** Packaged plugin path: install via the harness's own CLI, raw entry on failure. */
 async function packagedPluginSetup(
   plugin: PackagedPlugin,
@@ -429,6 +493,7 @@ async function packagedPluginSetup(
   // shouldn't prompt for (or count a decline against) a plugin that's
   // already there. Skipped in mock mode, which never reads real state.
   if (!options.mock && (await plugin.alreadyInstalled())) {
+    await removeSupersededRawEntry(agentId, options.dir, region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'already-installed' });
     p.log.success(`Subtext plugin already installed in ${agentName}.`);
     return;
@@ -465,6 +530,7 @@ async function packagedPluginSetup(
     // fall through to the raw MCP server entry
   }
   if (installed) {
+    await removeSupersededRawEntry(agentId, options.dir, region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'plugin-cli' });
     p.log.success(
       `Subtext plugin installed — available in your next ${agentName} session.`,
