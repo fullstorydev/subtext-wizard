@@ -478,6 +478,36 @@ async function removeSupersededRawEntry(
   }
 }
 
+/**
+ * Confirm gate for the plugin prompts. An explicit "No" is a decline —
+ * instructions for later. Ctrl+C / Escape skips the rest of the step
+ * with no further output: unlike the wizard's earlier prompts this is
+ * not a CancelledError, because by now the install itself has already
+ * succeeded and "nothing was changed" / exit 130 would misreport it.
+ */
+async function confirmOrSkip(
+  message: string,
+  agentId: string,
+  region: Region,
+  onEvent: (event: string, properties?: Record<string, unknown>) => void,
+  laterTitle: string,
+): Promise<boolean> {
+  const answer = await p.confirm({ message });
+  if (p.isCancel(answer)) {
+    onEvent('plugin_setup_declined', { agent: agentId, cancelled: true });
+    p.log.info(
+      pc.dim('Plugin setup skipped — run this installer again any time to set it up.'),
+    );
+    return false;
+  }
+  if (!answer) {
+    onEvent('plugin_setup_declined', { agent: agentId });
+    p.note(pluginInstructions(agentId, region).join('\n'), laterTitle);
+    return false;
+  }
+  return true;
+}
+
 /** Packaged plugin path: install via the harness's own CLI, raw entry on failure. */
 async function packagedPluginSetup(
   plugin: PackagedPlugin,
@@ -501,16 +531,16 @@ async function packagedPluginSetup(
 
   // A pre-selected --agent means "just run it", same as the prompt-review
   // bypass; otherwise ask before touching the user's harness config.
-  let install = true;
-  if (!options.agent) {
-    const answer = await p.confirm({
-      message: `Install the Subtext plugin in ${agentName}? ${pc.dim(`(${plugin.confirmHint})`)}`,
-    });
-    install = !p.isCancel(answer) && answer;
-  }
-  if (!install) {
-    onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Install it later');
+  if (
+    !options.agent &&
+    !(await confirmOrSkip(
+      `Install the Subtext plugin in ${agentName}? ${pc.dim(`(${plugin.confirmHint})`)}`,
+      agentId,
+      region,
+      onEvent,
+      'Install it later',
+    ))
+  ) {
     return;
   }
 
@@ -542,16 +572,16 @@ async function packagedPluginSetup(
   const target = configWrite(agentId, options.dir, region)!;
   // The user approved the plugin install, not a config-file edit — ask
   // again before touching a different file (same --agent bypass as above).
-  let fallback = true;
-  if (!options.agent) {
-    const answer = await p.confirm({
-      message: `Add the Subtext MCP server to ${prettyPath(target.file)} instead?`,
-    });
-    fallback = !p.isCancel(answer) && answer;
-  }
-  if (!fallback) {
-    onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it later');
+  if (
+    !options.agent &&
+    !(await confirmOrSkip(
+      `Add the Subtext MCP server to ${prettyPath(target.file)} instead?`,
+      agentId,
+      region,
+      onEvent,
+      'Add it later',
+    ))
+  ) {
     return;
   }
   await applyConfigWrite(target, agentId, agentName, region, onEvent, 'config-write-fallback');
@@ -597,18 +627,18 @@ export async function offerPluginSetup(
   const agentName = chosen === MANUAL_CHOICE ? 'your agent' : chosen.definition.name;
   const shownPath = prettyPath(target.file);
 
-  let proceed = true;
-  if (!options.agent) {
-    const answer = await p.confirm({
-      message: `Add the Subtext MCP server to ${shownPath}? ${pc.dim(
+  if (
+    !options.agent &&
+    !(await confirmOrSkip(
+      `Add the Subtext MCP server to ${shownPath}? ${pc.dim(
         `(lets ${agentName} review captured sessions)`,
       )}`,
-    });
-    proceed = !p.isCancel(answer) && answer;
-  }
-  if (!proceed) {
-    onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it later');
+      agentId,
+      region,
+      onEvent,
+      'Add it later',
+    ))
+  ) {
     return;
   }
 
