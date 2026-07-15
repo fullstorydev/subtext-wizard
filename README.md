@@ -30,7 +30,8 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
                         windsurf, vscode, zed, claude-desktop, manual)
 --integrations <list>   Comma-separated tools to target, skips the picker
 --print-prompt          Print the install prompt instead of launching an agent
---no-telemetry          Disable usage telemetry
+--no-telemetry          Disable usage telemetry (otherwise the wizard asks for
+                        consent after login; never collects code or data)
 --debug                 Verbose output
 --help                  Show all options
 ```

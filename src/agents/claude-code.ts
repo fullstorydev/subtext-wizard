@@ -3,17 +3,17 @@ import path from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { firstExistingPath, runTerminalAgent, which } from './helpers.js';
+import { extractTelemetryMarkers } from './telemetry-marker.js';
 import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
 
 /**
- * Tools the headless run is pre-authorized to use beyond edits:
- * docs fetching, dependency installs, and the background telemetry curls
- * the prompt asks for. Everything else falls back to Claude Code's own
- * permission rules.
+ * Tools the headless run is pre-authorized to use beyond edits: docs fetching
+ * and dependency installs. Telemetry needs no tool here — the agent just prints
+ * markers to stdout that the wizard parses. Everything else falls back to
+ * Claude Code's own permission rules.
  */
 const ALLOWED_TOOLS = [
   'WebFetch',
-  'Bash(curl:*)',
   'Bash(npm install:*)',
   'Bash(pnpm add:*)',
   'Bash(yarn add:*)',
@@ -69,6 +69,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
     promptOnStdin: ctx.prompt,
     stdout: 'pipe',
     onStdoutLine: (line) => {
+      if (!line.trim()) return;
       let event: StreamEvent;
       try {
         event = JSON.parse(line) as StreamEvent;
@@ -79,7 +80,10 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
       if (event.type === 'assistant') {
         for (const block of event.message?.content ?? []) {
           if (block.type === 'text' && block.text?.trim()) {
-            console.log(pc.dim(block.text.trim()));
+            // The prompt has the agent print telemetry markers as plain text;
+            // pull them out of the stream and display only the rest.
+            const text = extractTelemetryMarkers(block.text, ctx.onTelemetry).trim();
+            if (text) console.log(pc.dim(text));
           } else if (block.type === 'tool_use') {
             console.log(pc.dim(`  → ${describeToolUse(block.name, block.input)}`));
             ctx.onEvent?.('agent_tool_use', { tool: block.name });
@@ -92,7 +96,11 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   });
 
   if (resultText) {
-    p.note(resultText, 'Claude Code result');
+    // The result event duplicates the final assistant message, so any marker
+    // lines already stripped from the streamed display would resurface here.
+    // Strip them again; re-reported markers are deduped by the caller.
+    const cleaned = extractTelemetryMarkers(resultText, ctx.onTelemetry).trim();
+    if (cleaned) p.note(cleaned, 'Claude Code result');
   }
   return { mode: 'ran', exitCode };
 }
