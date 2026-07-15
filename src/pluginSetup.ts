@@ -47,7 +47,8 @@ function indent(block: string): string[] {
 
 function prettyPath(file: string): string {
   const home = os.homedir();
-  return file.startsWith(home) ? `~${file.slice(home.length)}` : file;
+  if (file === home) return '~';
+  return file.startsWith(home + path.sep) ? `~${file.slice(home.length)}` : file;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,8 +337,22 @@ function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): Packaged
           `claude plugin marketplace add ${PLUGIN_REPO_URL}`,
           `claude plugin install ${PLUGIN_SPEC}`,
         ],
-        // No cheap local check; `plugin install` handles re-runs itself.
-        alreadyInstalled: async () => false,
+        // `claude plugin install` records installs in installed_plugins.json,
+        // keyed by <plugin>@<marketplace> — the same spec we install.
+        alreadyInstalled: async () => {
+          try {
+            const installed = JSON.parse(
+              await fs.readFile(
+                path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json'),
+                'utf8',
+              ),
+            ) as { plugins?: Record<string, unknown> };
+            const entry = installed.plugins?.[PLUGIN_SPEC];
+            return Array.isArray(entry) && entry.length > 0;
+          } catch {
+            return false;
+          }
+        },
         install: () => installClaudeCodePlugin(binaryPath, options.dir),
       };
     case 'gemini':
