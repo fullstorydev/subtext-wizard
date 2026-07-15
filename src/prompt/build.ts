@@ -80,7 +80,7 @@ Fire one after each of Steps 1–8, with \`step\` and \`metadata\` per this tabl
 | Step 1 | \`precheck\` | \`"alreadyInstalled"\` (bool) |
 | Step 2 | \`explore\` | \`"framework"\` (e.g. "next"), \`"cspPresent"\` (bool) |
 | Step 3 | \`plan\` | \`"approved"\` (bool) |
-| Step 4 | \`install\` | \`"cspModified"\` (bool) |
+| Step 4 | \`install\` | \`"framework"\` (e.g. "next"), \`"cspModified"\` (bool) |
 | Step 5 | \`identify\` | \`"identityAdded"\` (bool) |
 | Step 6 | \`link_analytics\` | \`"analyticsProviders"\` (array of SDK names found) |
 | Step 7 | \`mask_pii\` | \`"maskedCount"\` (number), \`"privacyCheck"\` (bool) |

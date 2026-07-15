@@ -58,7 +58,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     //    steers the prompt — analytics_providers telemetry is left to what
     //    the agent actually detects at the link_analytics step.
     const selection = await selectIntegrations(options);
-    const sendStart = (harness: string) => telemetry.step('start', 'success', { harness });
+    // No outcome: an in-progress handoff. `finish` supplies fail/skipped if
+    // the run ends early, and `complete` closes a successful funnel entry.
+    const sendStart = (harness: string) => telemetry.step('start', undefined, { harness });
 
     // 4. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
