@@ -82,9 +82,12 @@ export const OAUTH_SCOPES = process.env.SUBTEXT_OAUTH_SCOPES ?? 'sessions:read';
 /**
  * RFC 8707 resource indicator sent on the authorization and token requests,
  * identifying the Subtext MCP resource. Heimdall keys the Subtext branding
- * of its OAuth pages (login, consent) off this value's /mcp/subtext path —
- * see mn PR cowpaths/mn#106970 — and MCP clients send the same indicator,
- * so the wizard's login gets the same branded flow they do.
+ * of its OAuth pages off this value's /mcp/subtext path when it is the sole
+ * resource named (isSubtextResource): the consent page in cowpaths/mn#106970
+ * and the login page the wizard's browser flow hits first in cowpaths/mn#106971.
+ * MCP clients send the same indicator, so the wizard's login gets the same
+ * branded flow they do. The string must match gangplank's advertised RFC 9728
+ * metadata (https://api.<Domain>/mcp/subtext) byte-for-byte.
  */
 export function subtextOauthResource(region: Region): string {
   return `${apiBaseUrl(region)}/mcp/subtext`;
