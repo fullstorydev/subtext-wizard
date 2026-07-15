@@ -98,7 +98,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     });
 
     if (options.printPrompt) {
-      sendStart('print-prompt');
+      // No handoff happens here — we only print the prompt — so this must not
+      // fire a `start` event, which would inflate the funnel with runs that
+      // never began.
       console.log(prompt);
       await telemetry.flush();
       return 0;

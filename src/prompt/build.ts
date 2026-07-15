@@ -48,16 +48,16 @@ Log one event before Step 1 — \`workflow="onboard" step="start"\` with \`harne
 
 | After | Log step | Extra metadata |
 |-------|----------|----------------|
-| Step 1 | \`precheck\` | \`already_installed\` (bool) |
-| Step 2 | \`explore\` | \`framework\` (string), \`csp_present\` (bool) |
+| Step 1 | \`precheck\` | \`alreadyInstalled\` (bool) |
+| Step 2 | \`explore\` | \`framework\` (string), \`cspPresent\` (bool) |
 | Step 3 | \`plan\` | \`approved\` (bool) |
-| Step 4 | \`install\` | \`framework\` (string), \`csp_modified\` (bool) |
-| Step 5 | \`identify\` | \`identity_added\` (bool) |
-| Step 6 | \`link_analytics\` | \`analytics_providers\` (string[] — names of every analytics/session-replay/error-monitoring/feature-flag SDK found) |
-| Step 7 | \`mask_pii\` | \`masked_count\` (int), \`privacy_check\` (bool) |
-| Step 8 | \`complete\` | \`total_duration_ms\` (int), \`total_tokens\` (int) |
+| Step 4 | \`install\` | \`framework\` (string), \`cspModified\` (bool) |
+| Step 5 | \`identify\` | \`identityAdded\` (bool) |
+| Step 6 | \`link_analytics\` | \`analyticsProviders\` (string[] — names of every analytics/session-replay/error-monitoring/feature-flag SDK found) |
+| Step 7 | \`mask_pii\` | \`maskedCount\` (int), \`privacyCheck\` (bool) |
+| Step 8 | \`complete\` | \`totalDurationMs\` (int), \`totalTokens\` (int) |
 
-Every event's metadata may also include \`duration_ms\` (int) and \`tokens\` (int) for that step when you can estimate them. Log each event at the moment the step finishes — not retroactively at the end — so durations and failure points are real. Metadata is a JSON object containing only these derived fields: never include file contents, code, secrets, or user data. Telemetry is fire-and-forget: if the tool is unavailable (e.g. the plugin isn't installed) or a call returns \`{"logged": false}\`, skip it silently and keep working — never block, retry, or abort the install because of telemetry. Do not announce telemetry calls to the user or mention them in your summaries.`;
+Every event's metadata may also include \`durationMs\` (int) and \`tokens\` (int) for that step when you can estimate them. Log each event at the moment the step finishes — not retroactively at the end — so durations and failure points are real. Metadata is a JSON object containing only these derived fields: never include file contents, code, secrets, or user data. Telemetry is fire-and-forget: if the tool is unavailable (e.g. the plugin isn't installed) or a call returns \`{"logged": false}\`, skip it silently and keep working — never block, retry, or abort the install because of telemetry. Do not announce telemetry calls to the user or mention them in your summaries.`;
 }
 
 function curlTelemetrySection(telemetryUrl: string): string {
