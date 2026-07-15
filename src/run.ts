@@ -1,10 +1,11 @@
 import * as p from '@clack/prompts';
 import clipboard from 'clipboardy';
+import open from 'open';
 import pc from 'picocolors';
 import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
 import type { WizardOptions } from './config.js';
-import { WIZARD_VERSION, telemetryUrl } from './config.js';
+import { WIZARD_VERSION, appBaseUrl, SUBTEXT_SIGNUP_PATH, telemetryUrl } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
 import { showLogo } from './logo.js';
 import { guidePluginSetup } from './plugin.js';
@@ -30,6 +31,37 @@ export async function runWizard(options: WizardOptions): Promise<number> {
   telemetry.note('wizard_started', { mock: options.mock, dir_provided: options.dir !== process.cwd() });
 
   try {
+    // 0. TEMPORARY (until OAuth-native signup lands): offer account creation.
+    //    New users have no org yet, so the OAuth login below would dead-end —
+    //    send them to the Subtext signup page first, then continue into login
+    //    once they confirm they're done. A pre-supplied token already implies
+    //    an account, so skip the offer entirely there. Remove this whole block
+    //    (and SUBTEXT_SIGNUP_PATH) when signup is part of the OAuth flow.
+    if (!options.apiKey) {
+      const needsAccount = await p.confirm({
+        message: 'Do you need to create a new Subtext account?',
+        initialValue: true,
+      });
+      if (p.isCancel(needsAccount)) throw new CancelledError();
+      if (needsAccount) {
+        const signupUrl = `${appBaseUrl(options.region)}${SUBTEXT_SIGNUP_PATH}`;
+        p.log.step('Opening the Subtext account creation page in your browser.');
+        p.log.info(`If it doesn't open, visit:\n${pc.cyan(signupUrl)}`);
+        if (!options.mock) {
+          try {
+            await open(signupUrl);
+          } catch {
+            // URL is printed above; the user can open it manually.
+          }
+        }
+        const created = await p.confirm({
+          message: 'Did you finish creating your account? Continue to log in.',
+        });
+        if (p.isCancel(created) || !created) throw new CancelledError();
+      }
+      telemetry.note('account_creation_offered', { needed: needsAccount });
+    }
+
     // 1. Login (browser flow) so we can fetch the org-specific snippet.
     const auth = await authenticate(options);
 
