@@ -33,24 +33,26 @@ export type WorkflowStep =
 /** The lidar Outcome enum; empty string means "in progress". */
 export type WorkflowOutcome = 'success' | 'partial' | 'fail' | 'skipped';
 
-/** protojson form of lidar's WorkflowEventMetadata. Fields are sparse — only
- * those relevant to a given step are set. */
+/** protojson form of lidar's WorkflowEventMetadata. Field names mirror the
+ * proto exactly (snake_case) so wizard-sent events, the curl checkpoints, and
+ * the MCP telemetry-event tool all speak one convention. Fields are sparse —
+ * only those relevant to a given step are set. */
 export interface WorkflowEventMetadata {
-  durationMs?: number;
+  duration_ms?: number;
   tokens?: number;
   harness?: string;
   model?: string;
-  alreadyInstalled?: boolean;
+  already_installed?: boolean;
   framework?: string;
-  cspPresent?: boolean;
+  csp_present?: boolean;
   approved?: boolean;
-  cspModified?: boolean;
-  identityAdded?: boolean;
-  analyticsProviders?: string[];
-  maskedCount?: number;
-  privacyCheck?: boolean;
-  totalDurationMs?: number;
-  totalTokens?: number;
+  csp_modified?: boolean;
+  identity_added?: boolean;
+  analytics_providers?: string[];
+  masked_count?: number;
+  privacy_check?: boolean;
+  total_duration_ms?: number;
+  total_tokens?: number;
 }
 
 export class Telemetry {
@@ -79,7 +81,7 @@ export class Telemetry {
   }
 
   /**
-   * Send one WorkflowEvent. `durationMs` (on start) and `totalDurationMs`
+   * Send one WorkflowEvent. `duration_ms` (on start) and `total_duration_ms`
    * (on complete) default to time since the wizard launched. The server
    * stamps org, email, and timestamp from the session.
    */
@@ -87,9 +89,9 @@ export class Telemetry {
     if (!this.enabled) return;
     if (step === 'start') {
       this.startSent = true;
-      metadata = { durationMs: Date.now() - this.startedAt, ...metadata };
+      metadata = { duration_ms: Date.now() - this.startedAt, ...metadata };
     } else if (step === 'complete') {
-      metadata = { totalDurationMs: Date.now() - this.startedAt, ...metadata };
+      metadata = { total_duration_ms: Date.now() - this.startedAt, ...metadata };
     }
     const payload = {
       workflow: 'onboard',

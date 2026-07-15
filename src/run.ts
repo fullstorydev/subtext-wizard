@@ -139,6 +139,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     if (isAppRun) {
       const ready = await guidePluginSetup(chosen, auth.region);
       telemetry.note('plugin_setup', { agent: chosen.definition.id, ready });
+      // With the plugin installed the agent logs its own richer start event
+      // (harness + model) through the MCP tool. Without it, those MCP calls
+      // silently no-op — so the wizard records the start itself, otherwise a
+      // consented GUI handoff would produce no funnel events at all.
+      if (!ready) sendStart(chosen.definition.id);
     }
 
     if (isTerminalRun) {
@@ -148,8 +153,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
             message: `Run the install now with ${chosen.definition.name}? It will edit files in ${options.dir} (auto-accepting edits).`,
           });
       if (p.isCancel(confirmed) || !confirmed) throw new CancelledError();
-      // GUI runs skip this: their agent logs its own start event (with
-      // harness and model) through the MCP tool, per the prompt.
+      // GUI runs handle their own start above: with the plugin, the agent logs
+      // it (with harness and model) through the MCP tool per the prompt.
       sendStart(chosen.definition.id);
     }
 
