@@ -4,15 +4,19 @@ import pc from 'picocolors';
 import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
 import type { WizardOptions } from './config.js';
-import { WIZARD_VERSION } from './config.js';
+import { WIZARD_VERSION, telemetryUrl } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
 import { showLogo } from './logo.js';
-import { buildInstallPrompt } from './prompt/build.js';
+import { guidePluginSetup } from './plugin.js';
+import { buildInstallPrompt, type PromptTelemetry } from './prompt/build.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { Telemetry } from './telemetry.js';
 
 export async function runWizard(options: WizardOptions): Promise<number> {
   const telemetry = new Telemetry(options.telemetry, options.debug);
+  // Set once an agent is chosen so a post-selection cancel/fail (thrown out of
+  // scope of `chosen`) can still attach the harness the rest of the funnel uses.
+  let selectedHarness: string | undefined;
 
   await showLogo();
   p.intro(`${pc.bgCyan(pc.black(' Subtext '))} setup ${pc.dim(`v${WIZARD_VERSION}`)}`);
@@ -23,24 +27,43 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     p.log.warn('Mock mode: no real network calls will be made.');
   }
 
-  telemetry.capture('wizard_started', { mock: options.mock, dir_provided: options.dir !== process.cwd() });
+  telemetry.note('wizard_started', { mock: options.mock, dir_provided: options.dir !== process.cwd() });
 
   try {
     // 1. Login (browser flow) so we can fetch the org-specific snippet.
     const auth = await authenticate(options);
-    telemetry.setTag('org_id', auth.orgId);
-    telemetry.capture('auth_completed', { via: options.apiKey ? 'api_key' : 'browser' });
+
+    // Consent gate: nothing is collected unless the user says yes here.
+    // --no-telemetry skips the question (already opted out).
+    let telemetryEnabled = options.telemetry;
+    if (telemetryEnabled) {
+      const consent = await p.confirm({
+        message:
+          'Is it OK if Subtext collects anonymous telemetry about this install session (step progress, outcomes, and timings — never your code or data)? It helps improve the onboarding flow.',
+      });
+      if (p.isCancel(consent)) throw new CancelledError();
+      telemetryEnabled = consent;
+      if (!consent) telemetry.disable();
+    }
+    // The telemetry endpoint needs an authenticated session, so delivery can
+    // only start now — anything that fails before login goes unreported
+    // (flagged for review). Mock runs never send real events.
+    if (telemetryEnabled && !options.mock) {
+      telemetry.authorize(telemetryUrl(auth.region), auth.accessToken);
+    }
+    telemetry.note('auth_completed', { via: options.apiKey ? 'api_key' : 'browser' });
 
     // 2. Org-specific capture snippet.
     const snippet = await fetchCaptureSnippet(auth, options);
-    telemetry.capture('snippet_fetched');
+    telemetry.note('snippet_fetched');
 
-    // 3. Which integrations should the agent look for?
+    // 3. Which integrations should the agent look for? The selection only
+    //    steers the prompt — analytics_providers telemetry is left to what
+    //    the agent actually detects at the link_analytics step.
     const selection = await selectIntegrations(options);
-    telemetry.capture('integrations_selected', {
-      integrations: selection.integrations.map((i) => i.id),
-      other: selection.other,
-    });
+    // No outcome: an in-progress handoff. `finish` supplies fail/skipped if
+    // the run ends early, and `complete` closes a successful funnel entry.
+    const sendStart = (harness: string) => telemetry.step('start', undefined, { harness });
 
     // 4. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
@@ -52,37 +75,71 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         ? `Detected: ${detected.map((d) => d.definition.name).join(', ')}`
         : 'No coding agents detected.',
     );
-    telemetry.capture('agents_detected', { agents: detected.map((d) => d.definition.id) });
+    telemetry.note('agents_detected', { agents: detected.map((d) => d.definition.id) });
 
     const chosen = await chooseAgent(detected, options);
     const isTerminalRun = chosen !== MANUAL_CHOICE && chosen.definition.kind === 'terminal';
+    const isAppRun = chosen !== MANUAL_CHOICE && chosen.definition.kind === 'app';
+    selectedHarness = chosen === MANUAL_CHOICE ? 'manual' : chosen.definition.id;
 
-    // 5. Assemble the install prompt. Terminal agents get the autonomous
-    //    variant (no approval gates); app handoffs keep the interactive one.
+    // 5. GUI apps: set up the Subtext plugin before building the prompt. Whether
+    //    the plugin is actually present decides who owns telemetry, so it must be
+    //    known before the prompt's telemetry section is chosen. Skipped for
+    //    --print-prompt, which only previews the prompt and never hands off.
+    let pluginReady = false;
+    if (isAppRun && !options.printPrompt) {
+      pluginReady = await guidePluginSetup(chosen, auth.region);
+      telemetry.note('plugin_setup', { agent: chosen.definition.id, ready: pluginReady });
+    }
+
+    // 6. Assemble the install prompt. Terminal agents get the autonomous variant
+    //    (no approval gates); app handoffs keep the interactive one.
+    //    Telemetry never hands a credential to the agent's process — that would
+    //    leak the OAuth token to any install subprocess (npm postinstall etc.):
+    //    - terminal runs ('stdout') have the agent PRINT per-step markers the
+    //      wizard parses out of the output and sends with its own token;
+    //    - GUI handoffs ('mcp') log through the Subtext plugin's MCP tool, but
+    //      only when that plugin is set up — otherwise the wizard owns the
+    //      `start` (below) and the prompt must not tell the agent to log one
+    //      too, or a still-present plugin would double-count.
+    //    Either way the wizard owns the terminal `start`/`complete` bookends.
+    //    --print-prompt always previews the manual-handoff variant (interactive,
+    //    no agent-side telemetry): a printed prompt is pasted by hand, so no
+    //    wizard is attached to parse markers and no approval gate may be skipped.
+    const promptTelemetry: PromptTelemetry =
+      !telemetryEnabled || options.mock || options.printPrompt
+        ? 'none'
+        : isTerminalRun
+          ? 'stdout'
+          : isAppRun && pluginReady
+            ? 'mcp'
+            : 'none';
     const prompt = buildInstallPrompt({
       snippet,
       selection,
-      mode: isTerminalRun ? 'headless' : 'interactive',
-      runId: telemetry.runId,
-      telemetryEnabled: options.telemetry,
+      mode: isTerminalRun && !options.printPrompt ? 'headless' : 'interactive',
+      telemetry: promptTelemetry,
     });
 
     if (options.printPrompt) {
-      telemetry.capture('prompt_printed');
+      // No handoff happens here — we only print the prompt — so this must not
+      // fire a `start` event, which would inflate the funnel with runs that
+      // never began.
       console.log(prompt);
       await telemetry.flush();
       return 0;
     }
 
-    // 6. Hand off to the agent.
+    // 7. Hand off to the agent.
     if (chosen === MANUAL_CHOICE) {
+      sendStart('manual');
       let copied = true;
       try {
         await clipboard.write(prompt);
       } catch {
         copied = false;
       }
-      telemetry.capture('manual_handoff', { clipboard: copied });
+      telemetry.note('manual_handoff', { clipboard: copied });
       if (copied) {
         p.log.success('The install prompt is on your clipboard.');
         p.note(
@@ -98,10 +155,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       return 0;
     }
 
-    telemetry.capture('agent_launch_started', {
-      agent: chosen.definition.id,
-      kind: chosen.definition.kind,
-    });
+    // GUI without the plugin: the prompt carries no telemetry section, so the
+    // agent won't log anything — the wizard records the start itself, otherwise
+    // a consented GUI handoff would produce no funnel events at all. With the
+    // plugin the agent logs its own richer start (harness + model) via MCP, so
+    // the wizard stays quiet to avoid double-counting.
+    if (isAppRun && !pluginReady) sendStart(chosen.definition.id);
 
     if (isTerminalRun) {
       const confirmed = options.agent
@@ -110,21 +169,54 @@ export async function runWizard(options: WizardOptions): Promise<number> {
             message: `Run the install now with ${chosen.definition.name}? It will edit files in ${options.dir} (auto-accepting edits).`,
           });
       if (p.isCancel(confirmed) || !confirmed) throw new CancelledError();
+      sendStart(chosen.definition.id);
     }
+
+    // Marker lines come from an untrusted stream (the agent echoes output of
+    // arbitrary repo code), so cap what it can make the wizard send: one event
+    // per step, first marker wins. Legitimate cardinality is one per step.
+    const sentMarkerSteps = new Set<string>();
+    let agentInstallSucceeded = false;
 
     const result = await chosen.definition.launch({
       prompt,
       cwd: options.dir,
       binaryPath: chosen.binaryPath,
       debug: options.debug,
-      onEvent: (event, properties) => telemetry.capture(event, properties),
+      onEvent: (event, properties) => telemetry.note(event, properties),
+      // Per-step markers the agent printed to stdout. The wizard sends them
+      // with its own token, so no credential ever reaches the agent; the
+      // parser allowlists steps and metadata fields, and `harness` is written
+      // last so a marker can never override attribution.
+      onTelemetry: ({ step, outcome, metadata }) => {
+        if (sentMarkerSteps.has(step)) return;
+        sentMarkerSteps.add(step);
+        if (step === 'install' && outcome === 'success') agentInstallSucceeded = true;
+        telemetry.step(step, outcome, { ...metadata, harness: chosen.definition.id });
+      },
     });
 
-    telemetry.capture('wizard_completed', {
+    telemetry.note('wizard_completed', {
       agent: chosen.definition.id,
       mode: result.mode,
       exit_code: result.exitCode ?? null,
     });
+    // Terminal runs (`ran`) never hand the agent a credential, so the wizard
+    // owns their `complete` event. Exit code 0 only proves the CLI ran to
+    // completion — codex/gemini exit 0 even when the model refused or abandoned
+    // the install — so `success` additionally requires the agent's own
+    // install-step marker; exit 0 without it is recorded as `partial`. (When
+    // the prompt carried no marker instructions, exit code is all we have.)
+    // GUI handoffs log their own `complete` via the plugin's MCP tool.
+    if (result.mode === 'ran') {
+      const outcome =
+        result.exitCode !== 0
+          ? 'fail'
+          : agentInstallSucceeded || promptTelemetry !== 'stdout'
+            ? 'success'
+            : 'partial';
+      telemetry.step('complete', outcome, { harness: chosen.definition.id });
+    }
 
     if (result.mode === 'handoff') {
       p.note(result.followUp?.join('\n') ?? '', 'Next steps');
@@ -144,13 +236,21 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     await telemetry.flush();
     return result.mode === 'ran' ? (result.exitCode ?? 1) : 0;
   } catch (error) {
+    // Attach the harness if an agent was already chosen, so post-selection
+    // cancel/fail events carry the same agent id as the rest of the funnel.
+    const harnessMeta = selectedHarness ? { harness: selectedHarness } : {};
     if (error instanceof CancelledError) {
-      telemetry.capture('wizard_cancelled');
+      telemetry.finish('skipped', harnessMeta);
       p.cancel('Setup cancelled — nothing was changed.');
       await telemetry.flush();
       return 130;
     }
-    telemetry.captureError(error);
+    // The endpoint has no field for the error message itself (flagged for
+    // review) — only the fail outcome goes up.
+    telemetry.finish('fail', harnessMeta);
+    telemetry.note('wizard_error', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     p.log.error(error instanceof Error ? error.message : String(error));
     p.outro(pc.red('Setup failed.'));
     await telemetry.flush();
