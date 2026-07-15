@@ -1,6 +1,6 @@
 {
   "name": "@subtextdev/subtext-wizard",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Set up Subtext session capture in your app using your own coding agent",
   "license": "MIT",
   "homepage": "https://subtext.fullstory.com",
