@@ -33,11 +33,11 @@ Consent-gated and fire-and-forget: after login the wizard asks whether it may co
 
 Two layers:
 
-- **CLI events** (`src/telemetry.ts`) — a `start` event when a terminal or manual run reaches handoff (harness, time-to-handoff), plus a `fail`/`skipped` outcome if the run errors, is cancelled, or a terminal agent exits nonzero.
-- **Agent-side checkpoints** — the prompt instructs the agent to report each install step (`precheck` → `complete`) as it finishes; `analytics_providers` reflects what the agent actually detects, not the user's picker selection. Two variants:
-  - *Terminal runs* `curl` the endpoint directly, authenticated via a `SUBTEXT_TELEMETRY_TOKEN` env var the wizard sets on the child process.
+- **CLI events** (`src/telemetry.ts`) — a `start` event when a terminal or manual run reaches handoff (harness, time-to-handoff), a `complete` outcome when a terminal agent exits (`success` requires the agent's own install-step marker, not just exit code 0), and a `fail`/`skipped` outcome if the run errors or is cancelled.
+- **Agent-side checkpoints** — the prompt instructs the agent to report each install step as it finishes; `analytics_providers` reflects what the agent actually detects, not the user's picker selection. Two variants:
+  - *Terminal runs* never see a credential — the token would leak to every install subprocess (npm postinstall scripts etc.). Instead the agent **prints** one `__SUBTEXT_TELEMETRY__ {…}` marker line per step (`precheck` → `mask_pii`); the wizard parses these out of the agent's stdout (`src/agents/telemetry-marker.ts`, with a step/metadata allowlist and one-event-per-step cap) and sends the events itself with the token it holds in-process.
   - *GUI handoffs* log through the Subtext plugin's `telemetry-event` MCP tool — the wizard walks the user through installing the plugin (fullstorydev/subtext) before opening the app — and the agent logs its own `start` event with harness/model.
-  - *Manual handoffs* get no checkpoints: embedding the user's token in a clipboard prompt isn't safe, and there's no known agent to hold the plugin.
+  - *Manual handoffs* (and `--print-prompt` output) get no checkpoints: there's no wizard attached to parse markers and no known agent to hold the plugin.
 
 ## Endpoints
 

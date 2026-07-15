@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { TELEMETRY_MARKER_PREFIX } from '../agents/telemetry-marker.js';
 import type { IntegrationSelection } from '../integrations.js';
 import { packageRootPath } from '../paths.js';
 
@@ -6,14 +7,15 @@ export type PromptMode = 'headless' | 'interactive';
 
 /**
  * How the prompt instructs the agent to report telemetry:
- * - 'curl'  — headless terminal runs; the wizard hands the agent an auth
- *   token via env and it POSTs WorkflowEvents directly.
- * - 'mcp'   — GUI handoffs, where the wizard just guided the Subtext plugin
- *   setup; the agent logs through the `telemetry-event` MCP tool.
- * - 'none'  — telemetry declined/disabled, or an unknown agent (manual
- *   handoff) with no safe way to authenticate.
+ * - 'mcp'    — GUI handoffs where the Subtext plugin is set up; the agent logs
+ *   through the `telemetry-event` MCP tool.
+ * - 'stdout' — terminal runs; the agent PRINTS per-step markers to stdout that
+ *   the wizard parses and sends with its own token. The agent never holds a
+ *   credential, so a malicious install subprocess has nothing to steal.
+ * - 'none'   — telemetry declined/disabled, a GUI handoff without the plugin,
+ *   or a manual handoff. The wizard reports what it can (start/complete) itself.
  */
-export type PromptTelemetry = 'curl' | 'mcp' | 'none';
+export type PromptTelemetry = 'mcp' | 'stdout' | 'none';
 
 export interface BuildPromptInput {
   /** Org-specific capture snippet HTML fetched from the API. */
@@ -21,8 +23,6 @@ export interface BuildPromptInput {
   selection: IntegrationSelection;
   mode: PromptMode;
   telemetry: PromptTelemetry;
-  /** Realm-aware /subtext/telemetry endpoint the curl checkpoints POST to. */
-  telemetryUrl: string;
 }
 
 const HEADLESS_MODE_SECTION = `## Mode: autonomous (headless)
@@ -32,6 +32,24 @@ You are running non-interactively inside the Subtext setup CLI. The user cannot 
 const INTERACTIVE_MODE_SECTION = `## Mode: interactive
 
 Work through the steps with the user in this conversation, honoring every approval gate below.`;
+
+/** Step/metadata table shared by both telemetry sections, so the two
+ * transports can never drift. Steps 1–7 are agent-reportable over either
+ * transport; the Step 8 `complete` row is MCP-only (for terminal runs the
+ * wizard owns `complete` itself). Keep field names in sync with
+ * WorkflowEventMetadata (telemetry.ts) and the allowlist in
+ * telemetry-marker.ts. */
+const STEP_TABLE = `| After | \`step\` | \`metadata\` fields |
+|-------|---------|--------------------|
+| Step 1 | \`precheck\` | \`already_installed\` (bool) |
+| Step 2 | \`explore\` | \`framework\` (string), \`csp_present\` (bool) |
+| Step 3 | \`plan\` | \`approved\` (bool) |
+| Step 4 | \`install\` | \`framework\` (string), \`csp_modified\` (bool) |
+| Step 5 | \`identify\` | \`identity_added\` (bool) |
+| Step 6 | \`link_analytics\` | \`analytics_providers\` (string[] — names of every analytics/session-replay/error-monitoring/feature-flag SDK found) |
+| Step 7 | \`mask_pii\` | \`masked_count\` (int), \`privacy_check\` (bool) |`;
+
+const COMPLETE_ROW = `| Step 8 | \`complete\` | \`total_duration_ms\` (int), \`total_tokens\` (int) |`;
 
 /**
  * GUI-handoff variant: the agent logs milestones through the Subtext
@@ -46,47 +64,36 @@ The user already agreed, during Subtext setup, that this install may log anonymo
 
 Log one event before Step 1 — \`workflow="onboard" step="start"\` with \`harness\` (your coding tool) and \`model\` metadata — then one event as each of Steps 1–8 completes, with an \`outcome\` (\`success\`, \`partial\`, \`fail\`, or \`skipped\`) and that step's metadata fields:
 
-| After | Log step | Extra metadata |
-|-------|----------|----------------|
-| Step 1 | \`precheck\` | \`already_installed\` (bool) |
-| Step 2 | \`explore\` | \`framework\` (string), \`csp_present\` (bool) |
-| Step 3 | \`plan\` | \`approved\` (bool) |
-| Step 4 | \`install\` | \`framework\` (string), \`csp_modified\` (bool) |
-| Step 5 | \`identify\` | \`identity_added\` (bool) |
-| Step 6 | \`link_analytics\` | \`analytics_providers\` (string[] — names of every analytics/session-replay/error-monitoring/feature-flag SDK found) |
-| Step 7 | \`mask_pii\` | \`masked_count\` (int), \`privacy_check\` (bool) |
-| Step 8 | \`complete\` | \`total_duration_ms\` (int), \`total_tokens\` (int) |
+${STEP_TABLE}
+${COMPLETE_ROW}
 
 Every event's metadata may also include \`duration_ms\` (int) and \`tokens\` (int) for that step when you can estimate them. Log each event at the moment the step finishes — not retroactively at the end — so durations and failure points are real. Metadata is a JSON object containing only these derived fields: never include file contents, code, secrets, or user data. Telemetry is fire-and-forget: if the tool is unavailable (e.g. the plugin isn't installed) or a call returns \`{"logged": false}\`, skip it silently and keep working — never block, retry, or abort the install because of telemetry. Do not announce telemetry calls to the user or mention them in your summaries.`;
 }
 
-function curlTelemetrySection(telemetryUrl: string): string {
-  return `## Telemetry checkpoints
+/**
+ * Terminal-run variant: the agent reports progress by PRINTING marker lines to
+ * stdout. The wizard (which holds the auth token) parses them out of the output
+ * stream and sends the real events — the agent is never handed a credential, so
+ * an install subprocess it spawns has nothing to exfiltrate. The wizard owns
+ * the `start` and `complete` bookends itself, so this section covers only the
+ * intermediate steps.
+ */
+function stdoutTelemetrySection(): string {
+  return `## Telemetry
 
-As you finish each step below, fire a non-blocking background telemetry ping so setup progress is visible to the Subtext team. The \`SUBTEXT_TELEMETRY_TOKEN\` environment variable is already set in your environment:
+The user already agreed, during Subtext setup, that this install may log anonymous progress telemetry — step outcomes and timings, never code or data. Do not ask again, and do not run any command or make any network request for telemetry.
 
-\`\`\`sh
-curl -s -X POST '${telemetryUrl}' \\
-  -H "Authorization: Bearer $SUBTEXT_TELEMETRY_TOKEN" \\
-  -H 'Content-Type: application/json' \\
-  -d '{"workflow":"onboard","step":"<step>","outcome":"<outcome>","metadata":<metadata>}' \\
-  > /dev/null 2>&1 &
+Instead, as each of Steps 1–7 completes, PRINT a single line to stdout in exactly this format (nothing else on the line):
+
+\`\`\`
+${TELEMETRY_MARKER_PREFIX} {"step":"<step>","outcome":"<outcome>","metadata":<metadata>}
 \`\`\`
 
-Fire one after each of Steps 1–8, with \`step\` and \`metadata\` per this table. \`outcome\` is \`success\`, \`partial\`, \`fail\`, or \`skipped\`, describing how that step went. In \`metadata\`, omit any field you don't know, and always include \`"duration_ms"\` (wall-clock milliseconds you spent on the step) when you can estimate it.
+\`outcome\` is one of \`success\`, \`partial\`, \`fail\`, or \`skipped\`. The wizard reads these lines from your output and reports them; it also records the overall start and completion, so do NOT print markers for those. Use these steps and metadata fields:
 
-| After  | \`step\` | \`metadata\` fields |
-|--------|----------|--------------------|
-| Step 1 | \`precheck\` | \`"already_installed"\` (bool) |
-| Step 2 | \`explore\` | \`"framework"\` (e.g. "next"), \`"csp_present"\` (bool) |
-| Step 3 | \`plan\` | \`"approved"\` (bool) |
-| Step 4 | \`install\` | \`"framework"\` (e.g. "next"), \`"csp_modified"\` (bool) |
-| Step 5 | \`identify\` | \`"identity_added"\` (bool) |
-| Step 6 | \`link_analytics\` | \`"analytics_providers"\` (array of SDK names found) |
-| Step 7 | \`mask_pii\` | \`"masked_count"\` (number), \`"privacy_check"\` (bool) |
-| Step 8 | \`complete\` | \`"total_duration_ms"\`, \`"total_tokens"\` (whole-flow totals) |
+${STEP_TABLE}
 
-Telemetry must never block or delay the install — if \`curl\` is unavailable, the variable is empty, or the request fails, skip silently and move on.`;
+\`metadata\` is a compact JSON object; it may also include \`duration_ms\` (int) for that step when you can estimate it. Omit any field you don't know (use \`{}\` if none apply). Never include file contents, code, secrets, or user data. Print each marker at the moment the step finishes — not retroactively — so failure points are real. Telemetry is best-effort: if you can't determine a step's outcome, just skip its marker and keep working. Do not mention these markers in your report or summaries.`;
 }
 
 function integrationsSection(selection: IntegrationSelection): string {
@@ -147,10 +154,10 @@ export function buildInstallPrompt(input: BuildPromptInput): string {
   const replacements: Record<string, string> = {
     MODE_SECTION: headless ? HEADLESS_MODE_SECTION : INTERACTIVE_MODE_SECTION,
     TELEMETRY_SECTION:
-      input.telemetry === 'curl'
-        ? curlTelemetrySection(input.telemetryUrl)
-        : input.telemetry === 'mcp'
-          ? mcpTelemetrySection()
+      input.telemetry === 'mcp'
+        ? mcpTelemetrySection()
+        : input.telemetry === 'stdout'
+          ? stdoutTelemetrySection()
           : '',
     INTEGRATIONS_SECTION: integrationsSection(input.selection),
     SNIPPET: input.snippet,

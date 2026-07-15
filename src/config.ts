@@ -58,7 +58,7 @@ export const SNIPPET_PATH = '/code/v2/snippet';
  * protojson `WorkflowEvent` and requires an authenticated session — we send
  * the user's OAuth access token as `Authorization: Bearer`.
  */
-export const TELEMETRY_PATH = '/subtext/telemetry';
+const TELEMETRY_PATH = '/subtext/telemetry';
 
 export function telemetryUrl(region: Region): string {
   if (process.env.SUBTEXT_TELEMETRY_URL) return process.env.SUBTEXT_TELEMETRY_URL;

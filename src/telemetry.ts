@@ -34,9 +34,9 @@ export type WorkflowStep =
 export type WorkflowOutcome = 'success' | 'partial' | 'fail' | 'skipped';
 
 /** protojson form of lidar's WorkflowEventMetadata. Field names mirror the
- * proto exactly (snake_case) so wizard-sent events, the curl checkpoints, and
- * the MCP telemetry-event tool all speak one convention. Fields are sparse —
- * only those relevant to a given step are set. */
+ * proto exactly (snake_case) so wizard-sent events and the MCP telemetry-event
+ * tool all speak one convention. Fields are sparse — only those relevant to a
+ * given step are set. */
 export interface WorkflowEventMetadata {
   duration_ms?: number;
   tokens?: number;

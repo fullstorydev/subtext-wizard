@@ -74,8 +74,6 @@ export function runTerminalAgent(opts: {
   args: string[];
   cwd: string;
   promptOnStdin?: string;
-  /** Extra environment variables merged over the wizard's own. */
-  env?: Record<string, string>;
   /** 'inherit' streams the agent's own output; 'pipe' lets the caller parse it. */
   stdout?: 'inherit' | 'pipe';
   onStdoutLine?: (line: string) => void;
@@ -83,7 +81,6 @@ export function runTerminalAgent(opts: {
   return new Promise((resolve, reject) => {
     const child = spawn(opts.binaryPath, opts.args, {
       cwd: opts.cwd,
-      env: opts.env ? { ...process.env, ...opts.env } : undefined,
       stdio: [
         opts.promptOnStdin !== undefined ? 'pipe' : 'inherit',
         opts.stdout ?? 'inherit',
@@ -99,14 +96,23 @@ export function runTerminalAgent(opts: {
     if (opts.stdout === 'pipe' && child.stdout && opts.onStdoutLine) {
       let buffer = '';
       child.stdout.setEncoding('utf8');
+      // Blank lines are delivered too — callers that echo the stream back to
+      // the terminal need them to preserve the agent's output formatting.
       child.stdout.on('data', (chunk: string) => {
         buffer += chunk;
         let newline;
         while ((newline = buffer.indexOf('\n')) !== -1) {
           const line = buffer.slice(0, newline);
           buffer = buffer.slice(newline + 1);
-          if (line.trim()) opts.onStdoutLine!(line);
+          opts.onStdoutLine!(line);
         }
+      });
+      // Flush whatever follows the last newline once the stream ends — the
+      // agent's final line (often its closing summary or last telemetry
+      // marker) can arrive without a trailing '\n' and must not be dropped.
+      child.stdout.on('end', () => {
+        if (buffer) opts.onStdoutLine!(buffer);
+        buffer = '';
       });
     }
 

@@ -94,27 +94,31 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     // 6. Assemble the install prompt. Terminal agents get the autonomous variant
     //    (no approval gates); app handoffs keep the interactive one.
-    //    Agent-side telemetry: terminal runs curl the endpoint with a token we
-    //    pass via env; GUI runs log through the plugin's MCP tool, but ONLY when
-    //    that plugin is set up — otherwise the wizard owns the `start` (below)
-    //    and the prompt must not also tell the agent to log one, or a
-    //    still-present plugin would double-count the funnel. Manual handoffs get
-    //    none — we won't paste the user's access token into a clipboard prompt
-    //    (flagged for review). --print-prompt previews the GUI happy path (mcp).
+    //    Telemetry never hands a credential to the agent's process — that would
+    //    leak the OAuth token to any install subprocess (npm postinstall etc.):
+    //    - terminal runs ('stdout') have the agent PRINT per-step markers the
+    //      wizard parses out of the output and sends with its own token;
+    //    - GUI handoffs ('mcp') log through the Subtext plugin's MCP tool, but
+    //      only when that plugin is set up — otherwise the wizard owns the
+    //      `start` (below) and the prompt must not tell the agent to log one
+    //      too, or a still-present plugin would double-count.
+    //    Either way the wizard owns the terminal `start`/`complete` bookends.
+    //    --print-prompt always previews the manual-handoff variant (interactive,
+    //    no agent-side telemetry): a printed prompt is pasted by hand, so no
+    //    wizard is attached to parse markers and no approval gate may be skipped.
     const promptTelemetry: PromptTelemetry =
-      !telemetryEnabled || options.mock
+      !telemetryEnabled || options.mock || options.printPrompt
         ? 'none'
         : isTerminalRun
-          ? 'curl'
-          : isAppRun && (pluginReady || options.printPrompt)
+          ? 'stdout'
+          : isAppRun && pluginReady
             ? 'mcp'
             : 'none';
     const prompt = buildInstallPrompt({
       snippet,
       selection,
-      mode: isTerminalRun ? 'headless' : 'interactive',
+      mode: isTerminalRun && !options.printPrompt ? 'headless' : 'interactive',
       telemetry: promptTelemetry,
-      telemetryUrl: telemetryUrl(auth.region),
     });
 
     if (options.printPrompt) {
@@ -168,19 +172,28 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       sendStart(chosen.definition.id);
     }
 
+    // Marker lines come from an untrusted stream (the agent echoes output of
+    // arbitrary repo code), so cap what it can make the wizard send: one event
+    // per step, first marker wins. Legitimate cardinality is one per step.
+    const sentMarkerSteps = new Set<string>();
+    let agentInstallSucceeded = false;
+
     const result = await chosen.definition.launch({
       prompt,
       cwd: options.dir,
       binaryPath: chosen.binaryPath,
       debug: options.debug,
-      // Terminal agents fire the per-step telemetry checkpoints themselves;
-      // this token authenticates those curls. It is the user's own OAuth
-      // access token, exposed only to a child process on their machine.
-      env:
-        isTerminalRun && telemetryEnabled && !options.mock
-          ? { SUBTEXT_TELEMETRY_TOKEN: auth.accessToken }
-          : undefined,
       onEvent: (event, properties) => telemetry.note(event, properties),
+      // Per-step markers the agent printed to stdout. The wizard sends them
+      // with its own token, so no credential ever reaches the agent; the
+      // parser allowlists steps and metadata fields, and `harness` is written
+      // last so a marker can never override attribution.
+      onTelemetry: ({ step, outcome, metadata }) => {
+        if (sentMarkerSteps.has(step)) return;
+        sentMarkerSteps.add(step);
+        if (step === 'install' && outcome === 'success') agentInstallSucceeded = true;
+        telemetry.step(step, outcome, { ...metadata, harness: chosen.definition.id });
+      },
     });
 
     telemetry.note('wizard_completed', {
@@ -188,11 +201,21 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       mode: result.mode,
       exit_code: result.exitCode ?? null,
     });
-    // On success the agent's own step-8 checkpoint is the complete event;
-    // sending another here would double-count the funnel. A failed run can't
-    // be trusted to have reported itself, so the wizard records it.
-    if (result.mode === 'ran' && result.exitCode !== 0) {
-      telemetry.step('complete', 'fail', { harness: chosen.definition.id });
+    // Terminal runs (`ran`) never hand the agent a credential, so the wizard
+    // owns their `complete` event. Exit code 0 only proves the CLI ran to
+    // completion — codex/gemini exit 0 even when the model refused or abandoned
+    // the install — so `success` additionally requires the agent's own
+    // install-step marker; exit 0 without it is recorded as `partial`. (When
+    // the prompt carried no marker instructions, exit code is all we have.)
+    // GUI handoffs log their own `complete` via the plugin's MCP tool.
+    if (result.mode === 'ran') {
+      const outcome =
+        result.exitCode !== 0
+          ? 'fail'
+          : agentInstallSucceeded || promptTelemetry !== 'stdout'
+            ? 'success'
+            : 'partial';
+      telemetry.step('complete', outcome, { harness: chosen.definition.id });
     }
 
     if (result.mode === 'handoff') {
