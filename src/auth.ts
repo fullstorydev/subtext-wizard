@@ -6,12 +6,14 @@ import open from 'open';
 import pc from 'picocolors';
 import {
   AUTH_CALLBACK_TIMEOUT_MS,
+  AUTH_PROMPT_AFTER_MS,
   OAUTH_AUTHORIZE_PATH,
-  OAUTH_CLIENT_ID,
   OAUTH_REGISTER_PATH,
   OAUTH_SCOPES,
   OAUTH_TOKEN_PATH,
   authBaseUrl,
+  oauthClientId,
+  subtextOauthResource,
   type Region,
   type WizardOptions,
 } from './config.js';
@@ -32,7 +34,9 @@ export interface SubtextAuth {
  *   1. Dynamically register a public client (RFC 7591) unless a
  *      pre-registered client id is configured.
  *   2. Authorization-code + PKCE (S256), loopback redirect (RFC 8252) —
- *      we listen on an ephemeral 127.0.0.1 port for the callback.
+ *      we listen on an ephemeral 127.0.0.1 port for the callback. The
+ *      request carries the RFC 8707 resource indicator for the Subtext MCP
+ *      resource, which selects Subtext branding on the OAuth pages.
  *   3. Exchange the code at /oauth/token (public client, no secret).
  *
  * The access token is `<realm>.oauth!<JWT>`; the JWT payload carries
@@ -73,7 +77,8 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
   }
 
   const authBase = authBaseUrl(options.region);
-  const clientId = OAUTH_CLIENT_ID ?? (await registerClient(authBase));
+  const resource = subtextOauthResource(options.region);
+  const clientId = oauthClientId(options.region) ?? (await registerClient(authBase));
 
   // Loopback server for the OAuth redirect.
   const { server, port, callbackPromise } = await startCallbackServer();
@@ -90,6 +95,7 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
   authorizeUrl.searchParams.set('state', state);
   authorizeUrl.searchParams.set('code_challenge', challenge);
   authorizeUrl.searchParams.set('code_challenge_method', 'S256');
+  authorizeUrl.searchParams.set('resource', resource);
   if (OAUTH_SCOPES) authorizeUrl.searchParams.set('scope', OAUTH_SCOPES);
 
   p.log.step('Log in to Subtext to link this install to your org.');
@@ -106,15 +112,7 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
 
   let code: string;
   try {
-    const callback = await Promise.race([
-      callbackPromise,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error('Timed out waiting for browser login. Re-run the installer to try again.')),
-          AUTH_CALLBACK_TIMEOUT_MS,
-        ).unref(),
-      ),
-    ]);
+    const callback = await waitForCallback(callbackPromise, spinner);
     if (callback.state !== state) {
       throw new Error('OAuth state mismatch — aborting login for safety. Re-run the installer.');
     }
@@ -134,6 +132,7 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
     clientId,
     redirectUri,
     verifier,
+    resource,
   }).catch((error) => {
     spinner.stop('Login failed.', 1);
     throw error;
@@ -156,6 +155,54 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
     userEmail: claims.userEmail,
     region: claims.region ?? options.region,
   };
+}
+
+/**
+ * Waits for the OAuth loopback callback. After AUTH_PROMPT_AFTER_MS of
+ * silence, asks whether to keep waiting instead of giving up — a first-time
+ * signup detours through email verification and password setup, which takes
+ * far longer than any reasonable silent timeout, and the flow can only
+ * complete if this process keeps listening. Gives up for good once
+ * AUTH_CALLBACK_TIMEOUT_MS elapses.
+ */
+async function waitForCallback(
+  callbackPromise: Promise<CallbackResult>,
+  spinner: ReturnType<typeof p.spinner>,
+): Promise<CallbackResult> {
+  const deadline = Date.now() + AUTH_CALLBACK_TIMEOUT_MS;
+  for (;;) {
+    const waitMs = Math.min(AUTH_PROMPT_AFTER_MS, deadline - Date.now());
+    if (waitMs <= 0) {
+      throw new Error('Timed out waiting for browser login. Re-run the installer to try again.');
+    }
+    const result = await Promise.race([
+      callbackPromise,
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), waitMs).unref()),
+    ]);
+    if (result !== 'timeout') {
+      return result;
+    }
+
+    spinner.stop('Still waiting for browser login.');
+    const keepWaiting = await Promise.race([
+      callbackPromise,
+      p.confirm({
+        message:
+          'Keep waiting? (If you just created an account, finish the email verification ' +
+          'and password steps in your browser — this window will pick the login back up.)',
+      }),
+    ]);
+    if (typeof keepWaiting === 'object') {
+      // The callback arrived while the prompt was up.
+      spinner.start('Finishing login…');
+      return keepWaiting;
+    }
+    if (p.isCancel(keepWaiting) || !keepWaiting) {
+      spinner.start('Waiting for you to finish logging in…');
+      throw new Error('Login canceled. Re-run the installer to try again.');
+    }
+    spinner.start('Waiting for you to finish logging in…');
+  }
 }
 
 /** RFC 7591 dynamic client registration — same call MCP clients make. */
@@ -205,7 +252,7 @@ async function startCallbackServer(): Promise<{
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(
       error
-        ? '<html><body><h2>Login failed</h2><p>You can close this tab and return to the terminal.</p></body></html>'
+        ? '<html><body><h2>Login didn&rsquo;t complete</h2><p>Close this tab, return to your terminal, and re-run <code>npx @subtext/install</code> to try again.</p></body></html>'
         : '<html><body><h2>Logged in to Subtext</h2><p>You can close this tab and return to the terminal.</p></body></html>',
     );
     resolveCallback({
@@ -235,7 +282,7 @@ interface TokenResponse {
 
 async function exchangeCode(
   authBase: string,
-  args: { code: string; clientId: string; redirectUri: string; verifier: string },
+  args: { code: string; clientId: string; redirectUri: string; verifier: string; resource: string },
 ): Promise<TokenResponse> {
   const res = await fetch(`${authBase}${OAUTH_TOKEN_PATH}`, {
     method: 'POST',
@@ -246,6 +293,10 @@ async function exchangeCode(
       redirect_uri: args.redirectUri,
       client_id: args.clientId,
       code_verifier: args.verifier,
+      // RFC 8707: the token request repeats the resource indicator from the
+      // authorization request. Heimdall ignores it today (no audience
+      // restriction yet) but MCP-spec clients send it on both requests.
+      resource: args.resource,
     }),
     signal: AbortSignal.timeout(15_000),
   });
