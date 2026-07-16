@@ -29,14 +29,6 @@ export function appBaseUrl(region: Region): string {
   return region === 'eu' ? 'https://app.eu1.fullstory.com' : 'https://app.fullstory.com';
 }
 
-/**
- * TEMPORARY: the Subtext-themed account creation page (webber
- * `/subtext/signup`). Used to hand new users an account before the OAuth
- * login below — remove once OAuth-native signup lands and drop the offer in
- * run.ts with it.
- */
-export const SUBTEXT_SIGNUP_PATH = '/subtext/signup';
-
 /** Capture hosts baked into the snippet, realm-aware. */
 export function captureHosts(region: Region): { host: string; script: string } {
   return region === 'eu'
