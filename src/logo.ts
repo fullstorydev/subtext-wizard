@@ -78,6 +78,19 @@ function fg(rgb: Rgb): string {
 
 const RESET = '\x1b[0m';
 
+/**
+ * The logo's base purple, for inline text elsewhere in the wizard. 256-color
+ * terminals get xterm 99 (the logo's own resting fallback); no-color output
+ * passes through untouched. Closes with default-foreground, not a full reset,
+ * so it composes inside other styling.
+ */
+export function brandPurple(text: string): string {
+  const mode = colorMode();
+  if (mode === 'none') return text;
+  const open = mode === '256' ? '\x1b[38;5;99m' : fg(BASE_PURPLE);
+  return `${open}${text}\x1b[39m`;
+}
+
 /** Base color for a row — a subtle deep-to-bright vertical gradient. */
 function rowColor(y: number, rows: number): Rgb {
   return lerp(DEEP_PURPLE, BASE_PURPLE, y / Math.max(1, rows - 1));

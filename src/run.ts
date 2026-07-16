@@ -5,6 +5,7 @@ import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
 import type { WizardOptions } from './config.js';
 import { WIZARD_VERSION, telemetryUrl } from './config.js';
+import { showDemoGuide } from './demo.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
 import { showLogo } from './logo.js';
 import { guidePluginSetup } from './plugin.js';
@@ -174,6 +175,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, (event, properties) =>
         telemetry.note(event, properties),
       );
+      await showDemoGuide({
+        agentName: 'your coding agent',
+        installPending: true,
+        clipboardHoldsInstallPrompt: copied,
+        yes: options.yes,
+        onEvent: (event, properties) => telemetry.note(event, properties),
+      });
       p.outro('Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
       return 0;
@@ -250,6 +258,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     if (result.mode === 'handoff') {
       p.note(result.followUp?.join('\n') ?? '', 'Next steps');
+      await showDemoGuide({
+        agentName: chosen.definition.name,
+        installPending: true,
+        yes: options.yes,
+        onEvent: (event, properties) => telemetry.note(event, properties),
+      });
       p.outro('Finish the install in your agent — it will guide you from here.');
     } else if (result.exitCode === 0) {
       // Terminal install succeeded — wire Subtext into the harness that ran it
@@ -257,8 +271,14 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       await offerPluginSetup(chosen, auth.region, options, (event, properties) =>
         telemetry.note(event, properties),
       );
+      await showDemoGuide({
+        agentName: chosen.definition.name,
+        installPending: false,
+        yes: options.yes,
+        onEvent: (event, properties) => telemetry.note(event, properties),
+      });
       p.outro(
-        'Subtext install finished. Review the changes (and subtext-setup-report.md), then deploy to start capturing sessions.',
+        'Subtext install finished. Review the changes (and subtext-setup-report.md), then deploy to capture real user sessions.',
       );
     } else {
       p.outro(
