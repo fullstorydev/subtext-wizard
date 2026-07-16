@@ -28,11 +28,14 @@ export interface DemoGuideContext {
   /** Harness display name ("Claude Code"), or "your coding agent" when the
    * user took the raw prompt and we never learned which one. */
   agentName: string;
-  /** True when the install prompt still has to run (manual copy / GUI
-   * handoff) — the guide then leads with "once the install finishes". */
+  /** True when the install isn't confirmed done — the prompt still has to run
+   * (manual copy / GUI handoff), or a terminal run ended without the agent's
+   * install-success marker. The guide then leads with "once the install
+   * finishes" instead of presenting the snippet as already live. */
   installPending: boolean;
-  /** Manual path only: the install prompt currently occupies the clipboard,
-   * so copying the demo prompt now would clobber it. Warn in the confirm. */
+  /** Manual and GUI handoff paths: the install prompt currently occupies the
+   * clipboard, so copying the demo prompt now would clobber it. Warn in the
+   * confirm. */
   clipboardHoldsInstallPrompt?: boolean;
   /** --yes (CI): show the guide, skip the interactive copy offer. */
   yes: boolean;
@@ -41,7 +44,7 @@ export interface DemoGuideContext {
 
 export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
   const lead = ctx.installPending
-    ? `Installation complete? Let's make sure everything works.`
+    ? `Once the install finishes, make sure everything works.`
     : `Installation complete — let's make sure everything works.`;
   // clack renders note bodies dimmed; pc.reset per line undoes that (the same
   // escape clack itself uses for note titles) so everything reads at full

@@ -81,7 +81,7 @@ function makeAppAgent(spec: AppAgentSpec): AgentDefinition {
         // Make sure the user can still get the prompt.
         p.log.message(ctx.prompt);
       }
-      return { mode: 'handoff', followUp };
+      return { mode: 'handoff', followUp, clipboardHoldsPrompt: copied };
     },
   };
   return definition;
