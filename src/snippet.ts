@@ -56,6 +56,14 @@ export async function fetchCaptureSnippet(
     if (!body.includes('_fs_org')) {
       throw new Error('unexpected response shape (no _fs_org assignment)');
     }
+    // The snippet is wrapped in a <script> tag and interpolated into a fenced
+    // ```html block in the agent prompt. A genuine snippet contains neither a
+    // backtick nor a closing </script>; either would let a compromised/MITM'd
+    // response break out of the fence and inject instructions into an
+    // auto-approved agent. Reject rather than trust `_fs_org` alone.
+    if (body.includes('`') || /<\/script/i.test(body)) {
+      throw new Error('snippet contains unexpected characters (backtick or </script>)');
+    }
     spinner.stop(`Got capture snippet for org ${auth.orgId}.`);
     return `<script>\n${body}\n</script>`;
   } catch (error) {

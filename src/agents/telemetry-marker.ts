@@ -1,3 +1,4 @@
+import { sanitizeTerminalOutput } from './helpers.js';
 import type { WorkflowEventMetadata, WorkflowOutcome, WorkflowStep } from '../telemetry.js';
 
 /**
@@ -129,7 +130,7 @@ export function makeMarkerLineFilter(
   return (line) => {
     const marker = parseTelemetryMarker(line);
     if (marker) onMarker?.(marker);
-    else process.stdout.write(`${line}\n`);
+    else process.stdout.write(`${sanitizeTerminalOutput(line)}\n`);
   };
 }
 

@@ -5,3 +5,7 @@ dist/
 .env
 .env.local
 .env.*.local
+
+# Local agent/editor state — never publish (may contain internal paths,
+# MCP server names, and permission history).
+.claude/

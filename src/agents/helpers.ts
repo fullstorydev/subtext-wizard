@@ -6,6 +6,38 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Strip dangerous terminal control sequences from untrusted agent output
+ * before echoing it to the user's terminal. Agents echo arbitrary repo content
+ * (READMEs, file bodies, command output), which can carry escape sequences
+ * that spoof output or abuse the terminal — e.g. OSC 52 clipboard writes.
+ *
+ * SGR color codes (CSI … m) are kept so the agent's colored output still
+ * renders; OSC sequences, cursor/screen manipulation, other ESC sequences, and
+ * stray C0 control chars (except tab/newline) are removed.
+ */
+export function sanitizeTerminalOutput(text: string): string {
+  return (
+    text
+      // OSC: ESC ] … terminated by BEL or ST (ESC \) — e.g. OSC 52 clipboard.
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\][\s\S]*?(?:\x07|\x1b\\)/g, '')
+      // CSI: ESC [ … final byte — keep only SGR (ends in 'm'), drop the rest.
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b\[[0-9;:?]*[ -/]*[@-~]/g, (m) => (m.endsWith('m') ? m : ''))
+      // Other ESC-introduced sequences (charset selection, single-char, etc.).
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b[@-Z\\-_]/g, '')
+      // Any ESC that isn't starting a kept SGR sequence (malformed/stray).
+      // eslint-disable-next-line no-control-regex
+      .replace(/\x1b(?!\[[0-9;:?]*[ -/]*m)/g, '')
+      // Remaining C0 controls and DEL, except tab, newline, and ESC (ESC was
+      // handled above so kept SGR codes survive this pass).
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\x00-\x08\x0b-\x1a\x1c-\x1f\x7f]/g, '')
+  );
+}
+
 /** Locate a command on PATH. Returns the resolved path or null. */
 export async function which(cmd: string): Promise<string | null> {
   const locator = process.platform === 'win32' ? 'where' : 'which';
