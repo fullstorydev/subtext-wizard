@@ -12,7 +12,6 @@ Usage:
 
 Options:
   --dir <path>            App directory to instrument (default: current directory)
-  --region <us|eu>        Data region for login and API hosts (default: us)
   --api-key <key>         Skip the browser login and use this OAuth access token.
                           Prefer the SUBTEXT_API_KEY env var — an --api-key on
                           the command line lands in shell history and is visible
@@ -45,7 +44,6 @@ function main(): void {
     parsed = parseArgs({
       options: {
         dir: { type: 'string' },
-        region: { type: 'string', default: 'us' },
         'api-key': { type: 'string' },
         agent: { type: 'string' },
         integrations: { type: 'string' },
@@ -81,14 +79,11 @@ function main(): void {
     process.exit(1);
   }
 
-  if (values.region !== 'us' && values.region !== 'eu') {
-    console.error(`--region must be 'us' or 'eu', got '${values.region}'.`);
-    process.exit(2);
-  }
-
   const options: WizardOptions = {
     dir: path.resolve(values.dir ?? process.cwd()),
-    region: values.region,
+    // EU is not supported yet; default to the US region. The --region flag is
+    // intentionally not exposed until EU support ships.
+    region: 'us',
     // Prefer the env var so a token need not appear in argv (shell history /
     // process list). An explicit --api-key still wins if both are set.
     apiKey: values['api-key'] ?? process.env.SUBTEXT_API_KEY,
