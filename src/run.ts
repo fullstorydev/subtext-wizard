@@ -8,7 +8,9 @@ import { WIZARD_VERSION, telemetryUrl } from './config.js';
 import { CancelledError, selectIntegrations } from './integrations.js';
 import { showLogo } from './logo.js';
 import { guidePluginSetup } from './plugin.js';
+import { offerPluginSetup } from './pluginSetup.js';
 import { buildInstallPrompt, type PromptTelemetry } from './prompt/build.js';
+import { offerPromptReview } from './promptReview.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { Telemetry } from './telemetry.js';
 
@@ -130,6 +132,24 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       return 0;
     }
 
+    // 6b. Pre-handoff transparency: let the user read the exact prompt the
+    //     agent will execute before anything runs. --yes (CI) skips it; for
+    //     terminal runs the autonomy confirm below remains the authorization.
+    if (!options.yes) {
+      const proceedLabel =
+        chosen === MANUAL_CHOICE
+          ? 'Copy the prompt to my clipboard'
+          : isTerminalRun
+            ? 'Continue'
+            : `Open ${chosen.definition.name} with the install prompt`;
+      const { reviewed } = await offerPromptReview(prompt, {
+        proceedLabel,
+        proceedHint:
+          chosen !== MANUAL_CHOICE && isTerminalRun ? `will run in ${options.dir}` : undefined,
+      });
+      if (reviewed) telemetry.note('prompt_reviewed');
+    }
+
     // 7. Hand off to the agent.
     if (chosen === MANUAL_CHOICE) {
       sendStart('manual');
@@ -150,6 +170,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         p.log.warn('Could not write to the clipboard — copy the prompt below.');
         console.log(`\n${prompt}\n`);
       }
+      // Plugin setup — we don't know the harness, so show every path.
+      await offerPluginSetup(MANUAL_CHOICE, auth.region, options, (event, properties) =>
+        telemetry.note(event, properties),
+      );
       p.outro('Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
       return 0;
@@ -228,6 +252,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       p.note(result.followUp?.join('\n') ?? '', 'Next steps');
       p.outro('Finish the install in your agent — it will guide you from here.');
     } else if (result.exitCode === 0) {
+      // Terminal install succeeded — wire Subtext into the harness that ran it
+      // (packaged plugin where one exists, raw MCP entry otherwise).
+      await offerPluginSetup(chosen, auth.region, options, (event, properties) =>
+        telemetry.note(event, properties),
+      );
       p.outro(
         'Subtext install finished. Review the changes (and subtext-setup-report.md), then deploy to start capturing sessions.',
       );
