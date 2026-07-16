@@ -50,6 +50,7 @@ jobs:
         run: npm run build
 
       - name: Publish npm package
-        # --provenance is automatic under trusted publishing, but explicit is
-        # self-documenting.
-        run: npm publish --access public --provenance
+        # NO --provenance: npm rejects provenance attestations from private
+        # source repos (E422 "Unsupported ... visibility: private"). This repo
+        # is private, so provenance was intentionally dropped in 059d114.
+        run: npm publish --access public
