@@ -24,7 +24,6 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
 
 ```
 --dir <path>            App directory to instrument (default: current directory)
---region <us|eu>        Data region for login and API hosts (default: us)
 --api-key <key>         Skip the browser login and use this access token
 --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
                         windsurf, vscode, zed, claude-desktop, manual)
@@ -35,8 +34,6 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
 --debug                 Verbose output
 --help                  Show all options
 ```
-
-EU org? Add `--region eu`.
 
 ## Development
 
