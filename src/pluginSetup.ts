@@ -10,18 +10,18 @@ import type { Region, WizardOptions } from './config.js';
 import { subtextMcpUrl } from './plugin.js';
 
 /**
- * Post-install plugin setup. Once the coding agent has run (or been handed)
- * the install prompt, wire Subtext into that same harness so it can review
- * captured sessions in later conversations.
+ * Post-install plugin setup for terminal harnesses and the manual path.
+ * Once the coding agent has run the install prompt, wire Subtext into that
+ * same harness so it can review captured sessions in later conversations.
+ * GUI apps never reach here — they get plugin.ts's guidePluginSetup before
+ * the handoff, whose outcome also decides telemetry ownership.
  *
- * The packaged plugin is preferred wherever one exists, because it bundles
+ * The packaged plugin is preferred where one exists, because it bundles
  * more than the MCP server (skills for Claude Code, both realm servers for
- * Gemini): Claude Code and Gemini CLI install it via their own CLIs, Cursor
- * via the official /add-plugin. Harnesses without a plugin get the raw MCP
- * server entry written straight into their own config file — tools only,
- * no agent commands involved. Harnesses without a file we can safely edit
- * (Zed, Claude Desktop, unknown) get instructions instead, as do declines
- * and unparseable configs.
+ * Gemini): Claude Code and Gemini CLI install it via their own CLIs.
+ * Harnesses without a plugin get the raw MCP server entry written straight
+ * into their own config file (Codex TOML) — tools only, no agent commands
+ * involved. Declines and unparseable configs get instructions instead.
  */
 
 /** The plugin repo: Claude Code marketplace and Gemini extension
@@ -191,12 +191,10 @@ function codexConfigWrite(file: string, url: string): ConfigWrite {
 }
 
 /**
- * The MCP config file each harness reads, in its own format. Project-scoped
- * where the harness supports it (the server rides along with the repo);
- * user-global otherwise. Returns null when there's no file we can safely
- * edit — those harnesses get instructions. Cursor is deliberately absent:
- * its packaged plugin (/add-plugin subtext) is the primary route, so it
- * goes through instructions rather than a config write. Claude Code and
+ * The MCP config file each terminal harness reads, in its own format.
+ * Project-scoped where the harness supports it (the server rides along with
+ * the repo); user-global otherwise. Returns null when there's no file we
+ * can safely edit — those harnesses get instructions. Claude Code and
  * Gemini entries are the fallbacks behind their packaged plugin installs.
  */
 function configWrite(agentId: string, dir: string, region: Region): ConfigWrite | null {
@@ -205,11 +203,6 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
   switch (agentId) {
     case 'claude-code':
       return jsonConfigWrite(path.join(dir, '.mcp.json'), 'mcpServers', { type: 'http', url });
-    case 'vscode':
-      return jsonConfigWrite(path.join(dir, '.vscode', 'mcp.json'), 'servers', {
-        type: 'http',
-        url,
-      });
     case 'gemini':
       // `url` + explicit `type` is the consolidated schema (the old
       // `httpUrl` field is deprecated, kept only as a compat fallback).
@@ -217,13 +210,6 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
         url,
         type: 'http',
       });
-    case 'windsurf':
-      // Cascade reads ~/.codeium/windsurf/mcp_config.json.
-      return jsonConfigWrite(
-        path.join(home, '.codeium', 'windsurf', 'mcp_config.json'),
-        'mcpServers',
-        { serverUrl: url },
-      );
     case 'codex':
       return codexConfigWrite(path.join(home, '.codex', 'config.toml'), url);
     default:
@@ -248,14 +234,6 @@ function pluginInstructions(agentId: string, region: Region): string[] {
         'Prefer a raw MCP server (tools only)? Add this to .mcp.json in the project:',
         ...indent(manualMcpConfig(region)),
       ];
-    case 'cursor':
-      return [
-        'In Cursor, run this in the agent pane (installs tools + skills):',
-        '  /add-plugin subtext',
-        '',
-        'Prefer a raw MCP server (tools only)? Add this to .cursor/mcp.json in the project:',
-        ...indent(JSON.stringify({ mcpServers: { subtext: { url } } }, null, 2)),
-      ];
     case 'gemini':
       return [
         'Install the Subtext extension (bundles the MCP servers):',
@@ -264,26 +242,11 @@ function pluginInstructions(agentId: string, region: Region): string[] {
         'Prefer a raw MCP server? Add this to ~/.gemini/settings.json:',
         ...indent(JSON.stringify({ mcpServers: { subtext: { url, type: 'http' } } }, null, 2)),
       ];
-    case 'windsurf':
-      return [
-        'Add this to ~/.codeium/windsurf/mcp_config.json (read by Cascade in Windsurf):',
-        ...indent(JSON.stringify({ mcpServers: { subtext: { serverUrl: url } } }, null, 2)),
-      ];
-    case 'claude-desktop':
-      return [
-        'In Claude Desktop: Settings → Connectors → Add custom connector,',
-        `then enter: ${url}`,
-      ];
     case 'codex':
       return [
         'Add the Subtext MCP server to ~/.codex/config.toml:',
         '  [mcp_servers.subtext]',
         `  url = "${url}"`,
-      ];
-    case 'vscode':
-      return [
-        'Add the Subtext MCP server to .vscode/mcp.json in this project:',
-        ...indent(JSON.stringify({ servers: { subtext: { type: 'http', url } } }, null, 2)),
       ];
     default:
       return [
@@ -524,10 +487,11 @@ async function packagedPluginSetup(
     return;
   }
 
-  // A pre-selected --agent means "just run it", same as the prompt-review
-  // bypass; otherwise ask before touching the user's harness config.
+  // Only an explicit --yes (CI) skips this — matching the wizard's other
+  // confirm gates. --agent merely preselects the harness; it never
+  // authorizes changes to the user's config.
   if (
-    !options.agent &&
+    !options.yes &&
     !(await confirmOrSkip(
       `Install the Subtext plugin in ${agentName}? ${pc.dim(`(${plugin.confirmHint})`)}`,
       agentId,
@@ -564,11 +528,18 @@ async function packagedPluginSetup(
   }
 
   p.log.warn('Plugin install failed — a raw MCP server entry (tools only) can be added instead.');
-  const target = configWrite(agentId, options.dir, region)!;
+  const target = configWrite(agentId, options.dir, region);
+  if (!target) {
+    // No writable config for this harness — don't crash on an invariant
+    // packagedPlugin() and configWrite() only uphold by convention.
+    onEvent('plugin_setup_failed', { agent: agentId });
+    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    return;
+  }
   // The user approved the plugin install, not a config-file edit — ask
-  // again before touching a different file (same --agent bypass as above).
+  // again before touching a different file (same --yes bypass as above).
   if (
-    !options.agent &&
+    !options.yes &&
     !(await confirmOrSkip(
       `Add the Subtext MCP server to ${prettyPath(target.file)} instead?`,
       agentId,
@@ -609,7 +580,7 @@ export async function offerPluginSetup(
 
   const target = chosen === MANUAL_CHOICE ? null : configWrite(agentId, options.dir, region);
   if (!target) {
-    // Cursor (plugin route), Zed, Claude Desktop, manual.
+    // Manual path, or a harness with no writable config.
     const lines =
       chosen === MANUAL_CHOICE
         ? manualChoiceInstructions(region)
@@ -623,7 +594,7 @@ export async function offerPluginSetup(
   const shownPath = prettyPath(target.file);
 
   if (
-    !options.agent &&
+    !options.yes &&
     !(await confirmOrSkip(
       `Add the Subtext MCP server to ${shownPath}? ${pc.dim(
         `(lets ${agentName} review captured sessions)`,

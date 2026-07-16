@@ -54,10 +54,17 @@ export async function offerPromptReview(
       // URL is printed above; the user can open it manually.
     }
   } catch {
-    // No server? Fall back to a temp file the user can open themselves.
-    const file = path.join(os.tmpdir(), 'subtext-install-prompt.md');
-    await fs.writeFile(file, prompt, 'utf8');
-    p.log.info(`Could not open a browser — the prompt is saved at ${pc.cyan(file)}`);
+    // No server? Fall back to a temp file the user can open themselves —
+    // and if even that fails, print the prompt inline. The user asked to
+    // READ the prompt; that must never abort the run.
+    try {
+      const file = path.join(os.tmpdir(), 'subtext-install-prompt.md');
+      await fs.writeFile(file, prompt, 'utf8');
+      p.log.info(`Could not open a browser — the prompt is saved at ${pc.cyan(file)}`);
+    } catch {
+      p.log.warn('Could not open a browser or write a temp file — the prompt is below.');
+      console.log(`\n${prompt}\n`);
+    }
   }
 
   const confirmed = await p.confirm({ message: `${proceedLabel}?` });
