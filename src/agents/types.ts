@@ -29,6 +29,9 @@ export interface LaunchResult {
   exitCode?: number;
   /** Instructions to show the user after a handoff. */
   followUp?: string[];
+  /** Handoff only: the install prompt was copied to the clipboard, so later
+   * clipboard offers (the demo prompt) must warn before clobbering it. */
+  clipboardHoldsPrompt?: boolean;
 }
 
 export interface AgentDefinition {
