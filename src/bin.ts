@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { WIZARD_VERSION, type WizardOptions } from './config.js';
+import { WIZARD_VERSION, warnOnDevOverrides, type WizardOptions } from './config.js';
 import { runWizard } from './run.js';
 
 const HELP = `
@@ -12,7 +12,10 @@ Usage:
 
 Options:
   --dir <path>            App directory to instrument (default: current directory)
-  --api-key <key>         Skip the browser login and use this OAuth access token
+  --api-key <key>         Skip the browser login and use this OAuth access token.
+                          Prefer the SUBTEXT_API_KEY env var — an --api-key on
+                          the command line lands in shell history and is visible
+                          to other local users via the process list.
   --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
                           windsurf, vscode, zed, claude-desktop, manual)
   --integrations <list>   Comma-separated integrations to target, skips the picker
@@ -20,6 +23,10 @@ Options:
                           datadog, launchdarkly, growthbook, intercom, pendo, appcues,
                           userpilot, sprig, segment — unknown names become "Other")
   --print-prompt          Build and print the install prompt instead of launching
+  --yes                   Skip the pre-launch confirmation (for CI/non-interactive
+                          use). The agent runs autonomously against --dir with
+                          edits — and, depending on the agent, command execution —
+                          auto-approved. Only pass this in a trusted directory.
   --mock                  No real network calls (placeholder auth + snippet)
   --no-telemetry          Disable telemetry
   --debug                 Verbose output
@@ -28,6 +35,10 @@ Options:
 `.trim();
 
 function main(): void {
+  // Surface any SUBTEXT_*_URL override (honored or ignored) before anything
+  // else runs, so a poisoned project env can never redirect a run silently.
+  warnOnDevOverrides();
+
   let parsed;
   try {
     parsed = parseArgs({
@@ -37,6 +48,7 @@ function main(): void {
         agent: { type: 'string' },
         integrations: { type: 'string' },
         'print-prompt': { type: 'boolean', default: false },
+        yes: { type: 'boolean', default: false },
         mock: { type: 'boolean', default: false },
         'no-telemetry': { type: 'boolean', default: false },
         debug: { type: 'boolean', default: false },
@@ -61,8 +73,8 @@ function main(): void {
     return;
   }
 
-  const nodeMajor = Number(process.versions.node.split('.')[0]);
-  if (nodeMajor < 18) {
+  const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number);
+  if (nodeMajor < 18 || (nodeMajor === 18 && nodeMinor < 17)) {
     console.error(`Subtext setup requires Node 18.17+, found ${process.version}.`);
     process.exit(1);
   }
@@ -72,13 +84,16 @@ function main(): void {
     // EU is not supported yet; default to the US region. The --region flag is
     // intentionally not exposed until EU support ships.
     region: 'us',
-    apiKey: values['api-key'],
+    // Prefer the env var so a token need not appear in argv (shell history /
+    // process list). An explicit --api-key still wins if both are set.
+    apiKey: values['api-key'] ?? process.env.SUBTEXT_API_KEY,
     agent: values.agent,
     integrations: values.integrations
       ?.split(',')
       .map((s) => s.trim())
       .filter(Boolean),
     printPrompt: values['print-prompt'] ?? false,
+    yes: values.yes ?? false,
     mock: values.mock ?? false,
     telemetry: !(values['no-telemetry'] ?? false),
     debug: values.debug ?? false,

@@ -163,10 +163,16 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     if (isAppRun && !pluginReady) sendStart(chosen.definition.id);
 
     if (isTerminalRun) {
-      const confirmed = options.agent
+      // Always confirm before handing off to an auto-approved agent — even
+      // when --agent preselected one. A single copied command line shouldn't
+      // be enough to launch an autonomous run against the user's project; only
+      // an explicit --yes (for CI) skips this. The message names what the
+      // agent actually auto-approves, command execution included.
+      const autonomy = chosen.definition.autonomy ?? 'auto-accepting file edits';
+      const confirmed = options.yes
         ? true
         : await p.confirm({
-            message: `Run the install now with ${chosen.definition.name}? It will edit files in ${options.dir} (auto-accepting edits).`,
+            message: `Run the install now with ${chosen.definition.name}? It runs autonomously against ${options.dir}, ${autonomy}.`,
           });
       if (p.isCancel(confirmed) || !confirmed) throw new CancelledError();
       sendStart(chosen.definition.id);

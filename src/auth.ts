@@ -80,13 +80,14 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
   const resource = subtextOauthResource(options.region);
   const clientId = oauthClientId(options.region) ?? (await registerClient(authBase));
 
-  // Loopback server for the OAuth redirect.
-  const { server, port, callbackPromise } = await startCallbackServer();
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
-
   const state = randomUUID();
   const verifier = randomBytes(32).toString('base64url');
   const challenge = createHash('sha256').update(verifier).digest('base64url');
+
+  // Loopback server for the OAuth redirect. It knows the expected state so it
+  // can ignore stray/forged hits instead of aborting on the first request.
+  const { server, port, callbackPromise } = await startCallbackServer(state);
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
 
   const authorizeUrl = new URL(`${authBase}${OAUTH_AUTHORIZE_PATH}`);
   authorizeUrl.searchParams.set('response_type', 'code');
@@ -232,7 +233,7 @@ interface CallbackResult {
   error?: string;
 }
 
-async function startCallbackServer(): Promise<{
+async function startCallbackServer(expectedState: string): Promise<{
   server: http.Server;
   port: number;
   callbackPromise: Promise<CallbackResult>;
@@ -249,6 +250,18 @@ async function startCallbackServer(): Promise<{
       return;
     }
     const error = url.searchParams.get('error');
+    const state = url.searchParams.get('state') ?? undefined;
+    // The loopback port is reachable by any local process or a drive-by web
+    // page. Only a request whose state matches (or a genuine OAuth error
+    // redirect from the auth server) completes the login; anything else gets a
+    // 400 and the server keeps listening — a stray/forged first hit must not
+    // be able to abort the flow. Nothing is stealable regardless (PKCE +
+    // unguessable state), this just removes a needless DoS.
+    if (!error && state !== expectedState) {
+      res.writeHead(400, { 'Content-Type': 'text/plain' });
+      res.end('Bad request.');
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(
       error
@@ -257,7 +270,7 @@ async function startCallbackServer(): Promise<{
     );
     resolveCallback({
       code: url.searchParams.get('code') ?? undefined,
-      state: url.searchParams.get('state') ?? undefined,
+      state,
       error: error
         ? `${error}${url.searchParams.get('error_description') ? `: ${url.searchParams.get('error_description')}` : ''}`
         : undefined,

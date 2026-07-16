@@ -20,6 +20,8 @@ npx @subtextdev/subtext-wizard
 
 When it finishes, your agent is connected to your sessions. See the [Subtext repo](https://github.com/fullstorydev/subtext) for what it can do from there.
 
+> **What runs on your machine:** the wizard hands the install to your own coding agent and runs it **autonomously** against the target directory — editing files, and (depending on the agent) running commands, with approvals auto-accepted. It also has the agent fetch Subtext's docs. Run it in a project directory you trust, and review the changes (and `subtext-setup-report.md`) before you deploy. The wizard asks you to confirm before the agent launches; pass `--yes` only for trusted, non-interactive/CI use.
+
 ## Options
 
 ```

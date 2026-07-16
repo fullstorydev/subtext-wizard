@@ -35,6 +35,11 @@ export interface AgentDefinition {
   id: string;
   name: string;
   kind: AgentKind;
+  /** For terminal agents: an honest, verb-phrase description of what the
+   * autonomous run auto-approves ("auto-accepting file edits", "…and commands
+   * inside its sandbox", …). Shown in the pre-launch confirmation so the user
+   * consents to what actually happens — command execution included. */
+  autonomy?: string;
   /** Returns detection info if this agent is installed, else null. */
   detect(): Promise<DetectedAgent | null>;
   launch(ctx: LaunchContext): Promise<LaunchResult>;

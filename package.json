@@ -28,7 +28,8 @@
   "files": [
     "dist",
     "templates",
-    "README.md"
+    "README.md",
+    "npm-shrinkwrap.json"
   ],
   "engines": {
     "node": ">=18.17.0"
@@ -37,7 +38,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "start": "node dist/bin.js"
+    "start": "node dist/bin.js",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
     "@clack/prompts": "^0.11.0",
