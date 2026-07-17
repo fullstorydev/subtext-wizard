@@ -1,5 +1,9 @@
 # Subtext setup wizard
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=240046&color=7b2cbf)
+![NPM Last Updated](https://img.shields.io/npm/last-update/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=3c096c&color=9d4edd)
+![NPM Version](https://img.shields.io/npm/v/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=5a189a&color=e0aaff)
+
 **Session replay, built for agents.** [Subtext](https://github.com/fullstorydev/subtext) is agentic session review: it captures production sessions of your app and connects them to your coding agent, so it can review what real users did, reproduce reported bugs, and verify its own UI changes.
 
 This wizard is the fastest way to set that up. One command, run in your project directory:
