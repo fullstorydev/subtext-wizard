@@ -1,5 +1,8 @@
 # Subtext setup wizard
 
+<img width="2560" height="640" alt="Frame 2" src="https://github.com/user-attachments/assets/051400e4-5543-42e4-8114-9c335ca86ded" />
+
+
 ![NPM Downloads](https://img.shields.io/npm/dm/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=240046&color=7b2cbf)
 ![NPM Last Updated](https://img.shields.io/npm/last-update/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=3c096c&color=9d4edd)
 ![NPM Version](https://img.shields.io/npm/v/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=5a189a&color=e0aaff)
