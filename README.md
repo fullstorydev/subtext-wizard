@@ -54,4 +54,4 @@ npm run build             # tsc → dist/
 node dist/bin.js --mock   # run the full flow with no network calls
 ```
 
-<img width="960" height="657" alt="wizard-portrait" src="https://github.com/user-attachments/assets/4aef85ed-a572-4bc5-8a70-a9c7e270f502" />
+<img width="1024" height="705" alt="wizard-hero" src="https://github.com/user-attachments/assets/48df8830-ec40-4ce6-86b4-392d1005997b" />
