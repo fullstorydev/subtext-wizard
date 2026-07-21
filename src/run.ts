@@ -34,7 +34,25 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
   try {
     // 1. Login (browser flow) so we can fetch the org-specific snippet.
-    const auth = await authenticate(options);
+    //    Ask once, up front, before hijacking the browser — a tab popping open
+    //    unprompted is jarring. The answer governs every automatic page-open in
+    //    the run (login here, prompt review later); on "no" we just print the
+    //    links instead. Skipped with --api-key, where there's no browser login.
+    p.log.info(`Wizard running in: ${pc.cyan(options.dir)}`);
+    let openInBrowser = true;
+    if (!options.apiKey) {
+      const consent = await p.confirm({
+        message: 'Launch browser automatically to log in?',
+      });
+      if (p.isCancel(consent)) throw new CancelledError();
+      openInBrowser = consent;
+    }
+    const auth = await authenticate(options, openInBrowser);
+    telemetry.note('auth_completed', { via: options.apiKey ? 'api_key' : 'browser' });
+
+    // 2. Org-specific capture snippet.
+    const snippet = await fetchCaptureSnippet(auth, options);
+    telemetry.note('snippet_fetched');
 
     // Consent gate: nothing is collected unless the user says yes here.
     // --no-telemetry skips the question (already opted out).
@@ -49,16 +67,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       if (!consent) telemetry.disable();
     }
     // The telemetry endpoint needs an authenticated session, so delivery can
-    // only start now — anything that fails before login goes unreported
-    // (flagged for review). Mock runs never send real events.
+    // only start now — no step events are sent before this point, so nothing
+    // is lost by asking after the snippet fetch. Mock runs never send real
+    // events.
     if (telemetryEnabled && !options.mock) {
       telemetry.authorize(telemetryUrl(auth.region), auth.accessToken);
     }
-    telemetry.note('auth_completed', { via: options.apiKey ? 'api_key' : 'browser' });
-
-    // 2. Org-specific capture snippet.
-    const snippet = await fetchCaptureSnippet(auth, options);
-    telemetry.note('snippet_fetched');
 
     // 3. Which integrations should the agent look for? The selection only
     //    steers the prompt — analytics_providers telemetry is left to what
@@ -147,6 +161,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         proceedLabel,
         proceedHint:
           chosen !== MANUAL_CHOICE && isTerminalRun ? `will run in ${options.dir}` : undefined,
+        openInBrowser,
       });
       if (reviewed) telemetry.note('prompt_reviewed');
     }
