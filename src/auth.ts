@@ -42,7 +42,10 @@ export interface SubtextAuth {
  * The access token is `<realm>.oauth!<JWT>`; the JWT payload carries
  * `org_id` and `sub` (user email), so no extra "who am I" call is needed.
  */
-export async function authenticate(options: WizardOptions): Promise<SubtextAuth> {
+export async function authenticate(
+  options: WizardOptions,
+  openBrowser = true,
+): Promise<SubtextAuth> {
   if (options.apiKey) {
     p.log.info('Using the token you provided — skipping browser login.');
     const claims = decodeTokenClaims(options.apiKey);
@@ -100,12 +103,17 @@ export async function authenticate(options: WizardOptions): Promise<SubtextAuth>
   if (OAUTH_SCOPES) authorizeUrl.searchParams.set('scope', OAUTH_SCOPES);
 
   p.log.step('Log in to Subtext to link this install to your org.');
-  p.log.info(`If your browser doesn't open, visit:\n${pc.cyan(authorizeUrl.toString())}`);
 
-  try {
-    await open(authorizeUrl.toString());
-  } catch {
-    // URL is printed above; the user can open it manually.
+  if (openBrowser) {
+    p.log.info(`If your browser doesn't open, visit:\n${pc.cyan(authorizeUrl.toString())}`);
+    try {
+      await open(authorizeUrl.toString());
+    } catch {
+      // URL is printed above; the user can open it manually.
+    }
+  } else {
+    // User declined the browser popup — just hand them the link to open.
+    p.log.info(`Open this link in your browser to log in:\n${pc.cyan(authorizeUrl.toString())}`);
   }
 
   const spinner = p.spinner();

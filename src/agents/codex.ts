@@ -11,7 +11,8 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   // `codex exec` is Codex's non-interactive mode; --full-auto lets it edit
   // files and run commands inside its workspace sandbox without prompting.
   // We pipe stdout (rather than inherit) so the wizard can pull telemetry
-  // markers out of the stream; every other line is echoed through unchanged.
+  // markers out of the stream; every other line is echoed through with the
+  // shared agent-output styling (purple gutter bar).
   const exitCode = await runTerminalAgent({
     binaryPath: ctx.binaryPath!,
     args: ['exec', '--full-auto', ctx.prompt],

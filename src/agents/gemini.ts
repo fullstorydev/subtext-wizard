@@ -13,7 +13,8 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   // repo/doc content ("run this command") can't reach a shell. (--yolo would
   // auto-approve everything, including command execution.) We pipe stdout
   // (rather than inherit) so the wizard can pull telemetry markers out of the
-  // stream; every other line is echoed through unchanged.
+  // stream; every other line is echoed through with the shared agent-output
+  // styling (purple gutter bar).
   const exitCode = await runTerminalAgent({
     binaryPath: ctx.binaryPath!,
     args: ['--approval-mode', 'auto_edit', '-p', ctx.prompt],

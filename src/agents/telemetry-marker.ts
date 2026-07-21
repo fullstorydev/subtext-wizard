@@ -1,4 +1,5 @@
 import { sanitizeTerminalOutput } from './helpers.js';
+import { printAgentText } from './output.js';
 import type { WorkflowEventMetadata, WorkflowOutcome, WorkflowStep } from '../telemetry.js';
 
 /**
@@ -121,8 +122,9 @@ export function parseTelemetryMarker(line: string): StepMarker | null {
 
 /**
  * onStdoutLine handler for terminal agents whose raw output is piped through
- * the wizard (codex, gemini): consume marker lines, echo everything else to
- * the user's terminal unchanged.
+ * the wizard (codex, gemini): consume marker lines, echo everything else
+ * through the shared agent-output styling (purple gutter bar) so all
+ * terminal agents' streams look the same.
  */
 export function makeMarkerLineFilter(
   onMarker?: (marker: StepMarker) => void,
@@ -130,7 +132,7 @@ export function makeMarkerLineFilter(
   return (line) => {
     const marker = parseTelemetryMarker(line);
     if (marker) onMarker?.(marker);
-    else process.stdout.write(`${sanitizeTerminalOutput(line)}\n`);
+    else printAgentText(sanitizeTerminalOutput(line));
   };
 }
 

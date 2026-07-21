@@ -3,6 +3,7 @@ import path from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { firstExistingPath, runTerminalAgent, sanitizeTerminalOutput, which } from './helpers.js';
+import { printAgentAction, printAgentText } from './output.js';
 import { extractTelemetryMarkers } from './telemetry-marker.js';
 import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
 
@@ -59,6 +60,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   p.log.info(pc.dim('Claude Code is doing the install in this terminal. Progress below.'));
 
   let resultText: string | undefined;
+  let lastAssistantText: string | undefined;
   const exitCode = await runTerminalAgent({
     binaryPath: ctx.binaryPath!,
     args: [
@@ -91,9 +93,12 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
             const text = sanitizeTerminalOutput(
               extractTelemetryMarkers(block.text, ctx.onTelemetry),
             ).trim();
-            if (text) console.log(pc.dim(text));
+            if (text) {
+              printAgentText(text);
+              lastAssistantText = text;
+            }
           } else if (block.type === 'tool_use') {
-            console.log(pc.dim(`  → ${describeToolUse(block.name, block.input)}`));
+            printAgentAction(describeToolUse(block.name, block.input));
             ctx.onEvent?.('agent_tool_use', { tool: block.name });
           }
         }
@@ -104,13 +109,16 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   });
 
   if (resultText) {
-    // The result event duplicates the final assistant message, so any marker
-    // lines already stripped from the streamed display would resurface here.
-    // Strip them again; re-reported markers are deduped by the caller.
+    // The result event normally duplicates the final assistant message, so any
+    // marker lines already stripped from the streamed display would resurface
+    // here. Strip them again (re-reported markers are deduped by the caller),
+    // and only show the note when the result differs from what was already
+    // streamed — e.g. error-subtype results that never appeared as an
+    // assistant message. Otherwise the same summary would print twice.
     const cleaned = sanitizeTerminalOutput(
       extractTelemetryMarkers(resultText, ctx.onTelemetry),
     ).trim();
-    if (cleaned) p.note(cleaned, 'Claude Code result');
+    if (cleaned && cleaned !== lastAssistantText) p.note(cleaned, 'Claude Code result');
   }
   return { mode: 'ran', exitCode };
 }

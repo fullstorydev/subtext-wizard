@@ -91,6 +91,29 @@ export function brandPurple(text: string): string {
   return `${open}${text}\x1b[39m`;
 }
 
+/**
+ * A shade along the logo's purple ramp: t=0 is deep purple, t=0.5 the base,
+ * t=1 the glow. Used for the agent-output gutter, whose shade drifts along
+ * the ramp as lines stream — a slow shimmer echoing the logo animation.
+ * 256-color terminals bucket onto the logo's own fallback codes; no-color
+ * output passes through untouched. Closes with default-foreground, not a
+ * full reset, so it composes inside other styling.
+ */
+export function purpleShade(text: string, t: number): string {
+  const mode = colorMode();
+  if (mode === 'none') return text;
+  const clamped = Math.max(0, Math.min(1, t));
+  if (mode === '256') {
+    const code = clamped < 0.25 ? 61 : clamped < 0.5 ? 99 : clamped < 0.75 ? 141 : 189;
+    return `\x1b[38;5;${code}m${text}\x1b[39m`;
+  }
+  const rgb =
+    clamped < 0.5
+      ? lerp(DEEP_PURPLE, BASE_PURPLE, clamped * 2)
+      : lerp(BASE_PURPLE, GLOW, clamped * 2 - 1);
+  return `${fg(rgb)}${text}\x1b[39m`;
+}
+
 /** Base color for a row — a subtle deep-to-bright vertical gradient. */
 function rowColor(y: number, rows: number): Rgb {
   return lerp(DEEP_PURPLE, BASE_PURPLE, y / Math.max(1, rows - 1));

@@ -21,18 +21,29 @@ export interface PromptReviewChoices {
   proceedLabel: string;
   /** Optional hint shown next to the proceed option (e.g. "edits files in /app, auto-accepting"). */
   proceedHint?: string;
+  /** Honor the run-wide browser preference: when false, we serve the prompt
+   * page but print the link instead of popping a browser tab. */
+  openInBrowser?: boolean;
 }
 
 export async function offerPromptReview(
   prompt: string,
-  { proceedLabel, proceedHint }: PromptReviewChoices,
+  { proceedLabel, proceedHint, openInBrowser = true }: PromptReviewChoices,
 ): Promise<{ reviewed: boolean }> {
   const lineCount = prompt.split('\n').length;
   const choice = await p.select({
     message: `The install prompt is ready (${lineCount} lines) — it tells your coding agent exactly what to do.`,
     options: [
-      { value: 'proceed', label: proceedLabel, hint: proceedHint },
-      { value: 'review', label: 'Review the prompt first', hint: 'opens in your browser' },
+      {
+        value: 'proceed',
+        label: proceedLabel,
+        hint: proceedHint,
+      },
+      {
+        value: 'review',
+        label: 'Review the prompt first',
+        hint: openInBrowser ? 'opens in your browser' : 'served locally — I print the link',
+      },
       { value: 'cancel', label: 'Cancel' },
     ],
   });
@@ -47,11 +58,20 @@ export async function offerPromptReview(
   try {
     const served = await servePromptPage(renderPromptHtml(prompt));
     closeServer = served.close;
-    p.log.info(`Prompt opened at ${pc.cyan(served.url)} — the page stays up until you answer below.`);
-    try {
-      await open(served.url);
-    } catch {
-      // URL is printed above; the user can open it manually.
+    if (openInBrowser) {
+      p.log.info(
+        `Prompt opened at ${pc.cyan(served.url)} — the page stays up until you answer below.`,
+      );
+      try {
+        await open(served.url);
+      } catch {
+        // URL is printed above; the user can open it manually.
+      }
+    } else {
+      // User opted out of browser popups — hand them the link instead.
+      p.log.info(
+        `Open the prompt at ${pc.cyan(served.url)} — the page stays up until you answer below.`,
+      );
     }
   } catch {
     // No server? Fall back to a temp file the user can open themselves —
