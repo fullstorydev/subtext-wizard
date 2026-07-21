@@ -17,7 +17,10 @@ npx @subtextdev/subtext-wizard
 
 **Requires a free Subtext account — no credit card.** Subtext is a hosted service that records and stores your app's sessions. Your account is where they live, and where your agent reads them from. When the wizard opens the login page, create an account in one click with Google, then come back to finish.
 
-<img width="576" height="429" alt="Screen Recording 2026-07-21 at 1 14 47 PM" src="https://github.com/user-attachments/assets/3297fba9-ced4-4ec4-9e11-fc9d978594a7" />
+
+<p align="center">
+  <img width="800" height="565" alt="WIZARD CLI START DEMO" src="https://github.com/user-attachments/assets/dfd32ec4-ba7c-40c9-a6dc-794852530a5b" />
+</p>
 
 ## What it does
 
