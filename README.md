@@ -7,7 +7,9 @@
 ![NPM Last Updated](https://img.shields.io/npm/last-update/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=3c096c&color=9d4edd)
 ![NPM Version](https://img.shields.io/npm/v/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=5a189a&color=e0aaff)
 
-**Session replay, built for agents.** [Subtext](https://github.com/fullstorydev/subtext) is agentic session review: it captures production sessions of your app and connects them to your coding agent, so it can review what real users did, reproduce reported bugs, and verify its own UI changes.
+**Session replay, built for agents.** Subtext is agentic session review: it captures production sessions of your app and connects them to your coding agent — Claude Code, Cursor, Codex, Devin, your own harness — so it can review what real users did, reproduce reported bugs, verify its own UI changes, and manage capture privacy rules, all without leaving the terminal.
+
+
 
 This wizard is the fastest way to set that up. One command, run in your project directory:
 
@@ -15,7 +17,7 @@ This wizard is the fastest way to set that up. One command, run in your project 
 npx @subtextdev/subtext-wizard
 ```
 
-**Requires a free Subtext account — no credit card.** Subtext is a hosted service that records and stores your app's sessions. Your account is where they live, and where your agent reads them from. When the wizard opens the login page, create an account in one click with Google, then come back to finish.
+**Requires a free Subtext account — no credit card.** Subtext is a hosted service that records and stores your app's sessions. Your account is where they live, and where your agent reads them from. When the wizard opens the login page, create an account, then come back to finish.
 
 
 <p align="center">
