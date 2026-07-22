@@ -76,12 +76,14 @@ jobs:
 
       - name: Publish npm package
         # `changeset publish` runs `npm publish` under the hood, with access
-        # set via .changeset/config.json + publishConfig. NO --provenance:
-        # npm rejects provenance attestations from private source repos
-        # (E422 "Unsupported ... visibility: private"). This repo is private,
-        # so provenance was intentionally dropped in 059d114.
+        # set via .changeset/config.json + publishConfig. Provenance is
+        # enabled via NPM_CONFIG_PROVENANCE: the repo is public, so npm
+        # accepts the OIDC attestation (it rejects provenance from private
+        # source repos with E422). The id-token: write permission above
+        # supplies the OIDC token.
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
           publish: npm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true
