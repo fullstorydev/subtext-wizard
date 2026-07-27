@@ -1,8 +1,8 @@
 import { WIZARD_VERSION } from './config.js';
 
 /**
- * Fire-and-forget telemetry against the real `/subtext/telemetry` endpoint
- * (lidar). The endpoint accepts a protojson `WorkflowEvent` (lidar.proto) and
+ * Fire-and-forget telemetry against the real `/subtext/telemetry` endpoint.
+ * The endpoint accepts a protojson `WorkflowEvent` and
  * requires an authenticated session, so nothing can be delivered until the
  * user has logged in — call authorize() with the OAuth access token first.
  * Events are POSTed in the background as they happen; nothing ever blocks the
@@ -16,7 +16,7 @@ import { WIZARD_VERSION } from './config.js';
  * - Events fired before login (e.g. auth failures) cannot be delivered at all.
  */
 
-/** Steps accepted by the endpoint — the lidar WorkflowStep enum. Anything
+/** Steps accepted by the endpoint — the WorkflowStep enum. Anything
  * else is rejected with 400, so granular CLI milestones that don't map to a
  * step go through note() (debug-only) instead. */
 export type WorkflowStep =
@@ -30,10 +30,10 @@ export type WorkflowStep =
   | 'mask_pii'
   | 'complete';
 
-/** The lidar Outcome enum; empty string means "in progress". */
+/** The Outcome enum; empty string means "in progress". */
 export type WorkflowOutcome = 'success' | 'partial' | 'fail' | 'skipped';
 
-/** protojson form of lidar's WorkflowEventMetadata. Field names mirror the
+/** protojson form of the WorkflowEventMetadata. Field names mirror the
  * proto exactly (snake_case) so wizard-sent events and the MCP telemetry-event
  * tool all speak one convention. Fields are sparse — only those relevant to a
  * given step are set. */

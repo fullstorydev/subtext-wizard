@@ -2,8 +2,8 @@
  * Central configuration.
  *
  * Auth and snippet endpoints are REAL production Fullstory endpoints
- * (verified against the mn monorepo: heimdall OAuth service and the public
- * snippet service). Anything still marked PLACEHOLDER has no backend yet.
+ * (the production OAuth service and the public snippet service). Anything
+ * still marked PLACEHOLDER has no backend yet.
  */
 
 import fs from 'node:fs';
@@ -78,7 +78,7 @@ export function warnOnDevOverrides(): void {
   }
 }
 
-/** OAuth 2.1 authorization server (heimdall). Discovery metadata lives at
+/** OAuth 2.1 authorization server. Discovery metadata lives at
  * `/.well-known/oauth-authorization-server`. */
 export function authBaseUrl(region: Region): string {
   return (
@@ -116,12 +116,12 @@ export const OAUTH_REGISTER_PATH = '/oauth/register';
 
 /**
  * Pre-registered Subtext OAuth client ids, per realm. Populate once the
- * Subtext client is registered in each realm's heimdall — a stable
+ * Subtext client is registered with each realm's OAuth server — a stable
  * first-party client avoids polluting the client table and hitting the
  * registration rate limit with a fresh RFC 7591 registration on every run.
  * Until then the wizard falls back to dynamic registration. (Branding does
- * not depend on this: heimdall keys the Subtext-branded OAuth pages off the
- * RFC 8707 resource indicator — see subtextOauthResource below.)
+ * not depend on this: the OAuth server keys the Subtext-branded OAuth pages
+ * off the RFC 8707 resource indicator — see subtextOauthResource below.)
  */
 const PREREGISTERED_OAUTH_CLIENT_IDS: Partial<Record<Region, string>> = {
   // us: pending pre-registration
@@ -147,12 +147,12 @@ export const OAUTH_SCOPES = process.env.SUBTEXT_OAUTH_SCOPES ?? 'sessions:read';
 
 /**
  * RFC 8707 resource indicator sent on the authorization and token requests,
- * identifying the Subtext MCP resource. Heimdall keys the Subtext branding
- * of its OAuth pages off this value's /mcp/subtext path when it is the sole
- * resource named (isSubtextResource): the consent page in cowpaths/mn#106970
- * and the login page the wizard's browser flow hits first in cowpaths/mn#106971.
+ * identifying the Subtext MCP resource. The OAuth server keys the Subtext
+ * branding of its OAuth pages off this value's /mcp/subtext path when it is
+ * the sole resource named (isSubtextResource): the consent page and the login
+ * page the wizard's browser flow hits first.
  * MCP clients send the same indicator, so the wizard's login gets the same
- * branded flow they do. The string must match gangplank's advertised RFC 9728
+ * branded flow they do. The string must match the API's advertised RFC 9728
  * metadata (https://api.<Domain>/mcp/subtext) byte-for-byte.
  */
 export function subtextOauthResource(region: Region): string {
@@ -164,9 +164,9 @@ export function subtextOauthResource(region: Region): string {
 export const SNIPPET_PATH = '/code/v2/snippet';
 
 /**
- * Telemetry ingestion endpoint (lidar, fronted by gangplank). Accepts a
- * protojson `WorkflowEvent` and requires an authenticated session — we send
- * the user's OAuth access token as `Authorization: Bearer`.
+ * Telemetry ingestion endpoint. Accepts a protojson `WorkflowEvent` and
+ * requires an authenticated session — we send the user's OAuth access token
+ * as `Authorization: Bearer`.
  */
 const TELEMETRY_PATH = '/subtext/telemetry';
 
