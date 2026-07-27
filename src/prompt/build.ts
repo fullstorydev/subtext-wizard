@@ -54,7 +54,7 @@ const COMPLETE_ROW = `| Step 8 | \`complete\` | \`total_duration_ms\` (int), \`t
 /**
  * GUI-handoff variant: the agent logs milestones through the Subtext
  * plugin's `telemetry-event` MCP tool. Adapted from the settings-ui setup
- * prompt (mn#107606), minus the consent ask — the wizard already asked in
+ * prompt, minus the consent ask — the wizard already asked in
  * the CLI, and this section only renders when the user said yes.
  */
 function mcpTelemetrySection(): string {

@@ -28,8 +28,8 @@ export interface SubtextAuth {
 }
 
 /**
- * Authenticate against Fullstory's production OAuth 2.1 server (heimdall,
- * auth.fullstory.com) using the standard native-app flow:
+ * Authenticate against Fullstory's production OAuth 2.1 server
+ * (auth.fullstory.com) using the standard native-app flow:
  *
  *   1. Dynamically register a public client (RFC 7591) unless a
  *      pre-registered client id is configured.
@@ -315,7 +315,7 @@ async function exchangeCode(
       client_id: args.clientId,
       code_verifier: args.verifier,
       // RFC 8707: the token request repeats the resource indicator from the
-      // authorization request. Heimdall ignores it today (no audience
+      // authorization request. The OAuth server ignores it today (no audience
       // restriction yet) but MCP-spec clients send it on both requests.
       resource: args.resource,
     }),
