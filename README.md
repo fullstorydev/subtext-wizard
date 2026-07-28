@@ -1,6 +1,6 @@
 # Subtext setup wizard
 
-<img width="2560" height="640" alt="Frame 2" src="https://github.com/user-attachments/assets/051400e4-5543-42e4-8114-9c335ca86ded" />
+<img width="2560" height="658" alt="LOCKUP - HORZ - BY FS - LIGHT - COLOR (3)" src="https://github.com/user-attachments/assets/3f0da600-52c8-4fa1-a203-1918e6a6cfda" />
 
 
 ![NPM Downloads](https://img.shields.io/npm/dm/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=240046&color=7b2cbf)
