@@ -1,7 +1,8 @@
 import pc from 'picocolors';
 
 /**
- * The Subtext mark, rendered at startup with a pink shimmer sweep.
+ * The SUBTEXT wordmark in half-block lettering (an homage to classic
+ * ANSI/BBS scene fonts), rendered at startup with a pink shimmer sweep.
  *
  * The animation is cosmetic-only and degrades gracefully: no TTY or no color
  * support prints the art statically; a terminal too small to hold it skips
@@ -10,34 +11,10 @@ import pc from 'picocolors';
 
 // prettier-ignore
 const RAW_ART = [
-  'subtextsubtextsubtextsubtex       tsubtextsubtextsubtextsu',
-  'textsubtextsubtextsubte     texts     tsubtextsubtextsubte',
-  'tsubtextsubtextsub     ubtextsubtextsu     subtextsubtexts',
-  'btextsubtextsu     subtextsubtextsubtextsu     subtextsubt',
-  'xtsubtextsub     ubtextsubtextsubtextsubtext     xtsubtext',
-  'ubtexts     tsubtextsubte          ubtextsubtexts     tsub',
-  'exts    xtsubtextsubtex               subtextsubtexts    x',
-  'sub extsubtextsubtextsu                   subtextsubtexts',
-  'tex subtextsubtex subtextsu                 xtsubtextsubt',
-  'tsu textsubtextsu      ubtextsub           subtextsubtext',
-  'bte tsubtextsubte          ubtexts     tsubtextsubtextsub',
-  'xts btextsubtexts             subtextsubtextsubtextsubtex',
-  'ubt xtsubtextsubt                  ubtextsubtextsubtextsu',
-  'ext ubtextsubtexts                    subtextsubtextsubte',
-  'sub extsubtextsubtexts                    subtextsubtexts',
-  'tex subtextsubtextsubtex                     tsubtextsubt',
-  'tsu textsubtextsubtextsubtext                btextsubtext',
-  'bte tsubtextsubtextsubt    ubtext            xtsubtextsub',
-  'xts btextsubtextsub          tsubtext        ubtextsubtex',
-  'ubt xtsubtextsubt                 subtexts   extsubtextsu',
-  'ext ubtextsubtexts                    subtextsubtextsubte',
-  'subt    ubtextsubtexts                 extsubtextsubt    u',
-  'textsub     ubtextsubtext            xtsubtextsub     ubte',
-  'tsubtextsubt     btextsubtextsubtextsubtexts     tsubtexts',
-  'btextsubtextsu     subtextsubtextsubtextsu     subtextsubt',
-  'xtsubtextsubtextsu     subtextsubtexts     tsubtextsubtext',
-  'ubtextsubtextsubtextsub     ubtex     extsubtextsubtextsub',
-  'extsubtextsubtextsubtextsub       textsubtextsubtextsubtex',
+  '▄████▄ ██  ██ █████▄ ██████ ██████ ██  ██ ██████',
+  '██▄▄▄▄ ██  ██ ██▄▄█▀   ██   ██▄▄▄▄  ▀██▀    ██',
+  '▀▀▀▀██ ██  ██ ██  ██   ██   ██▀▀▀▀  ▄██▄    ██',
+  '▀████▀ ▀████▀ █████▀   ██   ██████ ██  ██   ██',
 ];
 
 type Rgb = readonly [number, number, number];
