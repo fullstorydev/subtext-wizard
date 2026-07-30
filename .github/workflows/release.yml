@@ -1,5 +1,23 @@
 name: Release
 
+# One job, on every push to main (same flow as fullstorydev/subtext,
+# fullstorydev/subtext-cli, and sightmap/sightmap):
+#
+#   1. While changesets are pending, changesets/action opens/updates a
+#      "Version Packages" PR that bumps package.json and writes CHANGELOG.md.
+#      Nothing is tagged or published yet.
+#
+#   2. Once that PR merges (no changesets left to consume), the same action
+#      runs `changeset publish`, which publishes to npm, tags the release
+#      (vX.Y.Z), and creates the GitHub Release. No manual `git tag`, no
+#      environment gate. Pushes to main that leave the version unchanged
+#      (docs-only merges, etc.) are harmless no-ops.
+#
+# npm publish uses OIDC trusted publishing with provenance; no NPM_TOKEN
+# secret. One-time npm setup: a Trusted Publisher (GitHub Actions, repository
+# "fullstorydev/subtext-wizard", workflow "release.yml") registered on the
+# @subtextdev/subtext-wizard package at npmjs.com.
+
 on:
   push:
     branches: [main]
@@ -10,49 +28,19 @@ permissions:
   contents: read
 
 jobs:
-  # Maintains the rolling "Version Packages" PR. Runs on every push to main;
-  # when no changesets are pending it does nothing. Never publishes.
-  version:
+  release:
     runs-on: ubuntu-latest
     permissions:
+      # contents: write lets changesets/action push the version PR branch and
+      # release tags, and create GitHub Releases; pull-requests: write lets it
+      # open/update the Version Packages PR; id-token: write enables npm
+      # trusted publishing (OIDC), so no npm token secret is needed.
       contents: write
       pull-requests: write
+      id-token: write
     steps:
       # Actions are pinned to full commit SHAs (not mutable tags) to defend
       # against tag-jacking. Trailing comment records the human-readable tag.
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
-        with:
-          node-version: "24"
-
-      - name: Install dependencies
-        # --ignore-scripts guarantees no dependency lifecycle script runs in
-        # CI, even if the tree gains one in future.
-        run: npm ci --ignore-scripts
-
-      - uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
-        with:
-          version: npm run version-packages
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Publishes to npm. Only runs on the merge of a "Version Packages" PR, and
-  # is gated on the `release` environment so a merge alone can't publish —
-  # configure required reviewers on it in repo Settings → Environments.
-  publish:
-    runs-on: ubuntu-latest
-    if: contains(github.event.head_commit.message, 'Version Packages') || contains(github.event.head_commit.message, 'changeset-release/main')
-    environment: release
-    permissions:
-      # contents: write lets the changesets action push release tags and
-      # create GitHub Releases; id-token: write enables npm trusted
-      # publishing (OIDC), so no npm token secret is needed.
-      contents: write
-      id-token: write
-    steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
@@ -74,15 +62,17 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish npm package
-        # `changeset publish` runs `npm publish` under the hood, with access
-        # set via .changeset/config.json + publishConfig. Provenance is
-        # enabled via NPM_CONFIG_PROVENANCE: the repo is public, so npm
-        # accepts the OIDC attestation (it rejects provenance from private
-        # source repos with E422). The id-token: write permission above
-        # supplies the OIDC token.
+      - name: Version or publish
+        # With both inputs set, changesets/action maintains the Version
+        # Packages PR while changesets are pending, and publishes once they
+        # are consumed. `changeset publish` runs `npm publish` under the
+        # hood, with access set via .changeset/config.json + publishConfig.
+        # Provenance is enabled via NPM_CONFIG_PROVENANCE: the repo is
+        # public, so npm accepts the OIDC attestation (it rejects provenance
+        # from private source repos with E422).
         uses: changesets/action@a45c4d594aa4e2c509dc14a9f2b3b67ba3780d0d # v1.9.0
         with:
+          version: npm run version-packages
           publish: npm run release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
