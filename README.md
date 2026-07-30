@@ -3,9 +3,9 @@
 <img width="2560" height="658" alt="LOCKUP - HORZ - BY FS - LIGHT - COLOR (3)" src="https://github.com/user-attachments/assets/3f0da600-52c8-4fa1-a203-1918e6a6cfda" />
 
 
-![NPM Downloads](https://img.shields.io/npm/dm/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=240046&color=7b2cbf)
-![NPM Last Updated](https://img.shields.io/npm/last-update/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=3c096c&color=9d4edd)
-![NPM Version](https://img.shields.io/npm/v/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=5a189a&color=e0aaff)
+![NPM Downloads](https://img.shields.io/npm/dm/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=46001f&color=b81b56)
+![NPM Last Updated](https://img.shields.io/npm/last-update/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=6b0f36&color=f5447b)
+![NPM Version](https://img.shields.io/npm/v/%40subtextdev%2Fsubtext-wizard?style=flat-square&labelColor=9a1847&color=ffd6e4)
 
 **Session replay, built for agents.** Subtext is agentic session review: it captures production sessions of your app and connects them to your coding agent — Claude Code, Cursor, Codex, Devin, your own harness — so it can review what real users did, reproduce reported bugs, verify its own UI changes, and manage capture privacy rules, all without leaving the terminal.
 
