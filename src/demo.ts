@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import clipboard from 'clipboardy';
 import pc from 'picocolors';
-import { brandPurple } from './logo.js';
+import { brandPink } from './logo.js';
 
 /**
  * The wizard's closing section: a short "see it in action" guide. Capture is
@@ -48,7 +48,7 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
     : `Installation complete — let's make sure everything works.`;
   // clack renders note bodies dimmed; pc.reset per line undoes that (the same
   // escape clack itself uses for note titles) so everything reads at full
-  // strength. The prompt is set apart by color — brand purple is the agent's
+  // strength. The prompt is set apart by color — brand pink is the agent's
   // text, plain is the human's steps. Only the closing aside stays dim, and
   // re-dims inside the reset.
   p.note(
@@ -62,7 +62,7 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
       `3. Open ${ctx.agentName} at this project and paste in the demo prompt`,
       '   below — that part is the agent\'s job:',
       '',
-      ...DEMO_PROMPT_LINES.map((line) => `   ${brandPurple(line)}`),
+      ...DEMO_PROMPT_LINES.map((line) => `   ${brandPink(line)}`),
       '',
       pc.dim('Captured sessions can take a minute or two to show up.'),
     ]

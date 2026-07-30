@@ -12,7 +12,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   // files and run commands inside its workspace sandbox without prompting.
   // We pipe stdout (rather than inherit) so the wizard can pull telemetry
   // markers out of the stream; every other line is echoed through with the
-  // shared agent-output styling (purple gutter bar).
+  // shared agent-output styling (pink gutter bar).
   const exitCode = await runTerminalAgent({
     binaryPath: ctx.binaryPath!,
     args: ['exec', '--full-auto', ctx.prompt],

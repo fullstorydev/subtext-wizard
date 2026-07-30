@@ -123,7 +123,7 @@ export function parseTelemetryMarker(line: string): StepMarker | null {
 /**
  * onStdoutLine handler for terminal agents whose raw output is piped through
  * the wizard (codex, gemini): consume marker lines, echo everything else
- * through the shared agent-output styling (purple gutter bar) so all
+ * through the shared agent-output styling (pink gutter bar) so all
  * terminal agents' streams look the same.
  */
 export function makeMarkerLineFilter(

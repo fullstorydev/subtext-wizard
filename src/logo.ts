@@ -1,7 +1,8 @@
 import pc from 'picocolors';
 
 /**
- * The Subtext mark, rendered at startup with a purple shimmer sweep.
+ * The SUBTEXT wordmark in half-block lettering (an homage to classic
+ * ANSI/BBS scene fonts), rendered at startup with a pink shimmer sweep.
  *
  * The animation is cosmetic-only and degrades gracefully: no TTY or no color
  * support prints the art statically; a terminal too small to hold it skips
@@ -10,42 +11,17 @@ import pc from 'picocolors';
 
 // prettier-ignore
 const RAW_ART = [
-  '                            |BY',
-  '                         ;-C&d@O{i',
-  "                      ;1LY;:k'jU^fZfl.",
-  "                  .:(dr\"  'k: .vc  .)brl'",
-  '                ;|ar      w_   ^Uf     [pX!.',
-  '             zwW~        nx^    :J)       "hoI;',
-  '             *QBZ       _Ci      !L[       {%Q1',
-  "             p! 'idOI  `L]        +L+   c#}\"",
-  "             p!    '<X*&z:         ]kaq{\"",
-  "             p!     lUW8%a].       'l;.",
-  "             p!  '{Q|;  ]L)tZx",
-  '             p!;Qz~      >Ol >{Oc^',
-  '            lM&).         "p1   :/Yn>',
-  '             +;             uv     :)cX~',
-  '                             /O       ^1Yu].',
-  '                              ia!         )zut|',
-  '                               "Q]         ~ukm',
-  '                                :Yt     ._0z.xt',
-  '                                 `/J^ ;t0~   xt',
-  '                      ;-:         .|@@Zi     xt',
-  '                   `_Jmb(          )%*b),.   xt',
-  "                `<hQ\"  'L[        _Q<   x*(, xt",
-  '             u|%U       <Li      i0?       _%@#',
-  '             ~CW]        xn"    ;L{       ;oh`\'',
-  '                :1*u      Z?.  ^C/     )dnl.',
-  "                  .:1wu,  .k: .Xn  '\\btI'",
-  "                      :[JLl:h'nz\"n0\\I.",
-  '                         :_C&b@O]!',
-  '                            [p\\',
+  '▄████▄ ██  ██ █████▄ ██████ ██████ ██  ██ ██████',
+  '██▄▄▄▄ ██  ██ ██▄▄█▀   ██   ██▄▄▄▄  ▀██▀    ██',
+  '▀▀▀▀██ ██  ██ ██  ██   ██   ██▀▀▀▀  ▄██▄    ██',
+  '▀████▀ ▀████▀ █████▀   ██   ██████ ██  ██   ██',
 ];
 
 type Rgb = readonly [number, number, number];
 
-const DEEP_PURPLE: Rgb = [109, 40, 217];
-const BASE_PURPLE: Rgb = [155, 100, 250];
-const GLOW: Rgb = [231, 213, 255];
+const DEEP_PINK: Rgb = [184, 27, 86];
+const BASE_PINK: Rgb = [245, 68, 123]; // #F5447B, the brand accent
+const GLOW: Rgb = [255, 216, 230];
 
 const FRAME_MS = 28;
 const BAND_CORE = 3; // columns of full glow at the shimmer's center
@@ -79,44 +55,44 @@ function fg(rgb: Rgb): string {
 const RESET = '\x1b[0m';
 
 /**
- * The logo's base purple, for inline text elsewhere in the wizard. 256-color
- * terminals get xterm 99 (the logo's own resting fallback); no-color output
+ * The logo's base pink, for inline text elsewhere in the wizard. 256-color
+ * terminals get xterm 204 (the logo's own resting fallback); no-color output
  * passes through untouched. Closes with default-foreground, not a full reset,
  * so it composes inside other styling.
  */
-export function brandPurple(text: string): string {
+export function brandPink(text: string): string {
   const mode = colorMode();
   if (mode === 'none') return text;
-  const open = mode === '256' ? '\x1b[38;5;99m' : fg(BASE_PURPLE);
+  const open = mode === '256' ? '\x1b[38;5;204m' : fg(BASE_PINK);
   return `${open}${text}\x1b[39m`;
 }
 
 /**
- * A shade along the logo's purple ramp: t=0 is deep purple, t=0.5 the base,
+ * A shade along the logo's pink ramp: t=0 is deep pink, t=0.5 the base,
  * t=1 the glow. Used for the agent-output gutter, whose shade drifts along
  * the ramp as lines stream — a slow shimmer echoing the logo animation.
  * 256-color terminals bucket onto the logo's own fallback codes; no-color
  * output passes through untouched. Closes with default-foreground, not a
  * full reset, so it composes inside other styling.
  */
-export function purpleShade(text: string, t: number): string {
+export function pinkShade(text: string, t: number): string {
   const mode = colorMode();
   if (mode === 'none') return text;
   const clamped = Math.max(0, Math.min(1, t));
   if (mode === '256') {
-    const code = clamped < 0.25 ? 61 : clamped < 0.5 ? 99 : clamped < 0.75 ? 141 : 189;
+    const code = clamped < 0.25 ? 125 : clamped < 0.5 ? 204 : clamped < 0.75 ? 211 : 218;
     return `\x1b[38;5;${code}m${text}\x1b[39m`;
   }
   const rgb =
     clamped < 0.5
-      ? lerp(DEEP_PURPLE, BASE_PURPLE, clamped * 2)
-      : lerp(BASE_PURPLE, GLOW, clamped * 2 - 1);
+      ? lerp(DEEP_PINK, BASE_PINK, clamped * 2)
+      : lerp(BASE_PINK, GLOW, clamped * 2 - 1);
   return `${fg(rgb)}${text}\x1b[39m`;
 }
 
 /** Base color for a row — a subtle deep-to-bright vertical gradient. */
 function rowColor(y: number, rows: number): Rgb {
-  return lerp(DEEP_PURPLE, BASE_PURPLE, y / Math.max(1, rows - 1));
+  return lerp(DEEP_PINK, BASE_PINK, y / Math.max(1, rows - 1));
 }
 
 /** Render one frame; bandPos = Infinity renders the resting (no shimmer) state. */
@@ -126,7 +102,7 @@ function renderFrame(lines: string[], bandPos: number, mode: 'truecolor' | '256'
     return lines
       .map((line, y) => {
         const d = Math.abs(y * 2 - bandPos);
-        const color = d < BAND_CORE ? '\x1b[38;5;189m' : d < BAND_CORE + BAND_FALLOFF ? '\x1b[38;5;141m' : '\x1b[38;5;99m';
+        const color = d < BAND_CORE ? '\x1b[38;5;218m' : d < BAND_CORE + BAND_FALLOFF ? '\x1b[38;5;211m' : '\x1b[38;5;204m';
         return `\x1b[2K${color}${line}${RESET}`;
       })
       .join('\n');
