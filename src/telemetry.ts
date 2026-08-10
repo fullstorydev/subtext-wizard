@@ -75,11 +75,6 @@ export class Telemetry {
     this.accessToken = accessToken;
   }
 
-  /** Turn collection off for the rest of the run (user declined consent). */
-  disable(): void {
-    this.enabled = false;
-  }
-
   /**
    * Send one WorkflowEvent. `duration_ms` (on start) and `total_duration_ms`
    * (on complete) default to time since the wizard launched. The server
