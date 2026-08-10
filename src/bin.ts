@@ -1,7 +1,12 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { WIZARD_VERSION, warnOnDevOverrides, type WizardOptions } from './config.js';
+import {
+  WIZARD_VERSION,
+  telemetryOptedOutByEnv,
+  warnOnDevOverrides,
+  type WizardOptions,
+} from './config.js';
 import { runWizard } from './run.js';
 
 const HELP = `
@@ -28,7 +33,11 @@ Options:
                           edits — and, depending on the agent, command execution —
                           auto-approved. Only pass this in a trusted directory.
   --mock                  No real network calls (placeholder auth + snippet)
-  --no-telemetry          Disable telemetry
+  --no-telemetry          Opt out of telemetry. Anonymous install telemetry
+                          (step progress, outcomes, timings, and agent token
+                          usage — never your code or data) is ON by default;
+                          this flag, or DO_NOT_TRACK=1 / DISABLE_TELEMETRY=1,
+                          turns it off.
   --debug                 Verbose output
   --version               Print version
   --help                  Show this help
@@ -85,8 +94,12 @@ function main(): void {
     // intentionally not exposed until EU support ships.
     region: 'us',
     // Prefer the env var so a token need not appear in argv (shell history /
-    // process list). An explicit --api-key still wins if both are set.
-    apiKey: values['api-key'] ?? process.env.SUBTEXT_API_KEY,
+    // process list). An explicit --api-key still wins if both are set. Under
+    // --mock the env var is ignored entirely — a SUBTEXT_API_KEY left in the
+    // shell would otherwise be validated (and could reject) or short-circuit
+    // the canned mock auth, derailing offline test runs. An explicit --api-key
+    // is still honored under --mock for anyone testing that path on purpose.
+    apiKey: values['api-key'] ?? (values.mock ? undefined : process.env.SUBTEXT_API_KEY),
     agent: values.agent,
     integrations: values.integrations
       ?.split(',')
@@ -95,7 +108,10 @@ function main(): void {
     printPrompt: values['print-prompt'] ?? false,
     yes: values.yes ?? false,
     mock: values.mock ?? false,
-    telemetry: !(values['no-telemetry'] ?? false),
+    // Telemetry is on by default; both the explicit --no-telemetry flag and the
+    // standard DO_NOT_TRACK / DISABLE_TELEMETRY env vars opt out. The env-var
+    // opt-out is honored silently here (no prompt, no network call downstream).
+    telemetry: !(values['no-telemetry'] ?? false) && !telemetryOptedOutByEnv(),
     debug: values.debug ?? false,
   };
 

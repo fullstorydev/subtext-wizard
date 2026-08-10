@@ -110,6 +110,27 @@ export function captureHosts(region: Region): { host: string; script: string } {
     : { host: 'fullstory.com', script: 'edge.fullstory.com/s/fs.js' };
 }
 
+/**
+ * Standard, cross-tool opt-out env vars honored SILENTLY: DO_NOT_TRACK
+ * (consoledonottrack.com) and DISABLE_TELEMETRY. When either is set to a
+ * truthy value, telemetry is off with no prompt and no network call — the
+ * same as passing --no-telemetry — and the wizard says nothing about it.
+ * Following the DO_NOT_TRACK convention, a var counts as set when it holds a
+ * non-empty value other than "0" or "false".
+ */
+const TELEMETRY_OPT_OUT_ENV_VARS = ['DO_NOT_TRACK', 'DISABLE_TELEMETRY'] as const;
+
+/**
+ * The name of the env var opting the user out of telemetry, or undefined if
+ * none is set. Returned (rather than a bool) so --debug can name which one.
+ */
+export function telemetryOptedOutByEnv(): string | undefined {
+  return TELEMETRY_OPT_OUT_ENV_VARS.find((name) => {
+    const value = process.env[name];
+    return value !== undefined && value !== '' && value !== '0' && value.toLowerCase() !== 'false';
+  });
+}
+
 export const OAUTH_AUTHORIZE_PATH = '/oauth/authorize';
 export const OAUTH_TOKEN_PATH = '/oauth/token';
 export const OAUTH_REGISTER_PATH = '/oauth/register';

@@ -28,6 +28,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
   );
   if (options.mock) {
     p.log.warn('Mock mode: no real network calls will be made.');
+    if (!options.apiKey && process.env.SUBTEXT_API_KEY) {
+      p.log.warn('Ignoring SUBTEXT_API_KEY in mock mode — using canned auth.');
+    }
   }
 
   telemetry.note('wizard_started', { mock: options.mock, dir_provided: options.dir !== process.cwd() });
@@ -54,17 +57,19 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const snippet = await fetchCaptureSnippet(auth, options);
     telemetry.note('snippet_fetched');
 
-    // Consent gate: nothing is collected unless the user says yes here.
-    // --no-telemetry skips the question (already opted out).
-    let telemetryEnabled = options.telemetry;
+    // Telemetry is ON by default — announce it (no prompt) and point at the
+    // opt-out. The notice names agent token usage explicitly, since the funnel
+    // records it (tokens/total_tokens) alongside step progress. --no-telemetry
+    // and the DO_NOT_TRACK / DISABLE_TELEMETRY env vars all resolve to
+    // options.telemetry === false before we get here — the env vars silently,
+    // with no notice shown.
+    const telemetryEnabled = options.telemetry;
     if (telemetryEnabled) {
-      const consent = await p.confirm({
-        message:
-          'Is it OK if Subtext collects anonymous telemetry about this install session (step progress, outcomes, and timings — never your code or data)? It helps improve the onboarding flow.',
-      });
-      if (p.isCancel(consent)) throw new CancelledError();
-      telemetryEnabled = consent;
-      if (!consent) telemetry.disable();
+      p.log.info(
+        'Anonymous install telemetry is on: step progress, outcomes, timings, and ' +
+          'agent token usage — never your code or data. It helps improve the ' +
+          `onboarding flow. Re-run with ${pc.cyan('--no-telemetry')} to opt out.`,
+      );
     }
     // The telemetry endpoint needs an authenticated session, so delivery can
     // only start now — no step events are sent before this point, so nothing
