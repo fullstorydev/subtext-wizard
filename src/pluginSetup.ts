@@ -7,6 +7,7 @@ import { runTerminalAgent } from './agents/helpers.js';
 import { MANUAL_CHOICE } from './agents/index.js';
 import type { DetectedAgent } from './agents/types.js';
 import type { Region, WizardOptions } from './config.js';
+import { readableNoteBody } from './logo.js';
 import { subtextMcpUrl } from './plugin.js';
 
 /**
@@ -400,7 +401,7 @@ async function applyConfigWrite(
   if (outcome === 'unparseable') {
     onEvent('plugin_setup_failed', { agent: agentId });
     p.log.warn(`Could not update ${shownPath} — it may have a format we can't merge safely.`);
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), 'Add it by hand');
     return;
   }
   onEvent('plugin_setup_completed', { agent: agentId, method });
@@ -460,7 +461,7 @@ async function confirmOrSkip(
   }
   if (!answer) {
     onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), laterTitle);
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), laterTitle);
     return false;
   }
   return true;
@@ -473,6 +474,9 @@ async function packagedPluginSetup(
   region: Region,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
+  /** True when consent was already captured earlier (or --yes): proceed
+   * through the confirm gates without asking again. */
+  autoYes: boolean,
 ): Promise<void> {
   const agentId = chosen.definition.id;
   const agentName = chosen.definition.name;
@@ -487,11 +491,10 @@ async function packagedPluginSetup(
     return;
   }
 
-  // Only an explicit --yes (CI) skips this — matching the wizard's other
-  // confirm gates. --agent merely preselects the harness; it never
-  // authorizes changes to the user's config.
+  // --yes (CI) or consent already captured pre-handoff skips this. --agent
+  // merely preselects the harness; it never authorizes changes to the config.
   if (
-    !options.yes &&
+    !autoYes &&
     !(await confirmOrSkip(
       `Install the Subtext plugin in ${agentName}? ${pc.dim(`(${plugin.confirmHint})`)}`,
       agentId,
@@ -533,13 +536,13 @@ async function packagedPluginSetup(
     // No writable config for this harness — don't crash on an invariant
     // packagedPlugin() and configWrite() only uphold by convention.
     onEvent('plugin_setup_failed', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), 'Add it by hand');
     return;
   }
   // The user approved the plugin install, not a config-file edit — ask
-  // again before touching a different file (same --yes bypass as above).
+  // again before touching a different file (same auto-yes bypass as above).
   if (
-    !options.yes &&
+    !autoYes &&
     !(await confirmOrSkip(
       `Add the Subtext MCP server to ${prettyPath(target.file)} instead?`,
       agentId,
@@ -566,14 +569,32 @@ export async function offerPluginSetup(
   region: Region,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
+  /** Consent captured earlier in the flow, so this step doesn't prompt again:
+   * `true` proceeds silently, `false` skips with "add it later" instructions,
+   * `undefined` asks as usual. --yes always proceeds regardless. */
+  preConsent?: boolean,
 ): Promise<void> {
   const agentId = chosen === MANUAL_CHOICE ? MANUAL_CHOICE : chosen.definition.id;
   onEvent('plugin_setup_offered', { agent: agentId });
 
+  // Consent was already declined earlier — don't set anything up, just leave
+  // instructions for doing it later. (Never reached for MANUAL_CHOICE, which
+  // isn't passed a preConsent, but handled for completeness.)
+  if (preConsent === false) {
+    onEvent('plugin_setup_declined', { agent: agentId });
+    const lines =
+      chosen === MANUAL_CHOICE
+        ? manualChoiceInstructions(region)
+        : pluginInstructions(agentId, region);
+    p.note(readableNoteBody([WHY_PLUGIN, '', ...lines].join('\n')), 'Add review tools later');
+    return;
+  }
+  const autoYes = options.yes || preConsent === true;
+
   if (chosen !== MANUAL_CHOICE) {
     const plugin = packagedPlugin(chosen, options);
     if (plugin) {
-      await packagedPluginSetup(plugin, chosen, region, options, onEvent);
+      await packagedPluginSetup(plugin, chosen, region, options, onEvent, autoYes);
       return;
     }
   }
@@ -586,7 +607,7 @@ export async function offerPluginSetup(
         ? manualChoiceInstructions(region)
         : pluginInstructions(agentId, region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'instructions' });
-    p.note([WHY_PLUGIN, '', ...lines].join('\n'), 'Add the Subtext plugin');
+    p.note(readableNoteBody([WHY_PLUGIN, '', ...lines].join('\n')), 'Add the Subtext plugin');
     return;
   }
 
@@ -594,7 +615,7 @@ export async function offerPluginSetup(
   const shownPath = prettyPath(target.file);
 
   if (
-    !options.yes &&
+    !autoYes &&
     !(await confirmOrSkip(
       `Add the Subtext MCP server to ${shownPath}? ${pc.dim(
         `(lets ${agentName} review captured sessions)`,

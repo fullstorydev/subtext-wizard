@@ -31,26 +31,19 @@ export async function offerPromptReview(
   { proceedLabel, proceedHint, openInBrowser = true }: PromptReviewChoices,
 ): Promise<{ reviewed: boolean }> {
   const lineCount = prompt.split('\n').length;
-  const choice = await p.select({
-    message: `The install prompt is ready (${lineCount} lines) — it tells your coding agent exactly what to do.`,
-    options: [
-      {
-        value: 'proceed',
-        label: proceedLabel,
-        hint: proceedHint,
-      },
-      {
-        value: 'review',
-        label: 'Review the prompt first',
-        hint: openInBrowser ? 'opens in your browser' : 'served locally — I print the link',
-      },
-      { value: 'cancel', label: 'Cancel' },
-    ],
+  // Lighter than a 3-way select: a yes/no where the primary is "proceed" and
+  // the secondary opens the prompt to read first. Ctrl+C cancels the run.
+  const proceed = await p.confirm({
+    message: proceedHint
+      ? `The install prompt is ready (${lineCount} lines). ${proceedLabel}? ${pc.dim(`(${proceedHint})`)}`
+      : `The install prompt is ready (${lineCount} lines). ${proceedLabel}?`,
+    active: 'Yes',
+    inactive: 'Review the prompt first',
   });
-  if (p.isCancel(choice) || choice === 'cancel') {
+  if (p.isCancel(proceed)) {
     throw new CancelledError();
   }
-  if (choice === 'proceed') {
+  if (proceed) {
     return { reviewed: false };
   }
 
