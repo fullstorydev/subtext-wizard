@@ -212,7 +212,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       const answer = await p.confirm({
         message: `After the install, add Subtext review tools to ${chosen.definition.name} so it can replay your captured sessions?`,
       });
-      reviewToolsConsent = p.isCancel(answer) ? false : answer;
+      // Ctrl+C aborts the whole run: nothing has been installed yet, so cancel
+      // must mean "stop" — consistent with every other pre-handoff prompt.
+      // Only an explicit "No" declines the plugin and lets the install proceed.
+      if (p.isCancel(answer)) throw new CancelledError();
+      reviewToolsConsent = answer;
     }
 
     // The single funnel `start`. Sent per branch below (matching who owns
