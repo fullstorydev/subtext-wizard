@@ -85,10 +85,13 @@ async function openAgent(target: OpenAgentTarget): Promise<OpenResult> {
     return openTerminalHarness(target.binaryPath, target.dir);
   }
   try {
+    // No dir: a GUI app is already open at the project from the install
+    // hand-off, so we only need to bring it forward. Passing a folder to an app
+    // that doesn't open folders (Claude Desktop, opensFolder: false) would run
+    // `open -a Claude <path>`, which isn't how it launches.
     await openAppAtDir({
       binaryPath: target.binaryPath,
       macAppName: target.macAppName,
-      dir: target.dir,
     });
     return 'opened';
   } catch {
@@ -126,7 +129,11 @@ export async function offerCopyAndOpen(opts: {
   openedEvent: string;
 }): Promise<void> {
   const { prompt, agentName, target, clipboardBusy, label, readyHint, onEvent } = opts;
-  const canOpen = target != null && canOpenAgent(target);
+  // Don't bundle "open the agent" with a clipboard-clobbering copy while the
+  // clipboard still holds a prompt the user needs (the app/manual install
+  // prompt): reopening the editor shouldn't force overwriting it. Fall back to
+  // the copy-only offer (which warns) so copying stays a deliberate choice.
+  const canOpen = target != null && canOpenAgent(target) && !clipboardBusy;
   const clip = clipboardBusy ? ` ${pc.dim("(replaces what's on your clipboard now)")}` : '';
 
   const answer = await p.confirm({

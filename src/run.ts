@@ -77,17 +77,21 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // and the DO_NOT_TRACK / DISABLE_TELEMETRY env vars all resolve to
     // options.telemetry === false before we get here — the env vars silently,
     // with no notice shown.
+    // --print-prompt is a dry run that never installs, so it must not emit
+    // funnel events (start/complete) — that would inflate onboarding metrics
+    // with runs that never began. Leaving telemetry unauthorized drops every
+    // event (there's nowhere to send them), and the notice would be misleading.
     const telemetryEnabled = options.telemetry;
-    if (telemetryEnabled) {
+    if (telemetryEnabled && !options.printPrompt) {
       p.log.info(
         `Anonymous install telemetry is on — step progress & timings, never your code or data. Opt out with ${pc.cyan('--no-telemetry')}.`,
       );
     }
     // The telemetry endpoint needs an authenticated session, so delivery can
     // only start now — no step events are sent before this point, so nothing
-    // is lost by asking after the snippet fetch. Mock runs never send real
-    // events.
-    if (telemetryEnabled && !options.mock) {
+    // is lost by asking after the snippet fetch. Mock and dry (--print-prompt)
+    // runs never send real events.
+    if (telemetryEnabled && !options.mock && !options.printPrompt) {
       telemetry.authorize(telemetryUrl(auth.region), auth.accessToken);
     }
 
@@ -492,7 +496,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           `This runs as another autonomous pass with ${chosen.definition.name} in ${options.dir}, ${autonomy}.`,
         )
       ) {
-        const selection = await selectIntegrations(options);
+        // followUpSelection (not selectIntegrations) so a Ctrl+C on the
+        // optional picker maps to an empty selection and the enrich run still
+        // proceeds — the same handling the app/manual paths use. Cancelling the
+        // picker shouldn't silently drop a phase the user already opted into.
+        const selection = await followUpSelection();
         const enrichPrompt = buildEnrichPrompt({
           selection,
           mode: 'headless',
@@ -521,7 +529,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       harness: chosen.definition.id,
     });
     p.outro(
-      'Subtext install finished. Review the changes (and subtext-setup-report.md), then deploy to capture real user sessions.',
+      'Subtext install finished. Review the changes (and any subtext-*-report.md files), then deploy to capture real user sessions.',
     );
     await telemetry.flush();
     return 0;

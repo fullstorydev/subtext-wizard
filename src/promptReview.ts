@@ -80,7 +80,12 @@ export async function offerPromptReview(
     }
   }
 
-  const confirmed = await p.confirm({ message: `${proceedLabel}?` });
+  // Carry the autonomy hint here too: this is the confirm that actually
+  // authorizes the run, so the "runs autonomously in …, auto-accepting edits"
+  // wording must not be dropped just because the user chose to read first.
+  const confirmed = await p.confirm({
+    message: proceedHint ? `${proceedLabel}? ${pc.dim(`(${proceedHint})`)}` : `${proceedLabel}?`,
+  });
   closeServer?.();
   if (p.isCancel(confirmed) || !confirmed) {
     throw new CancelledError();

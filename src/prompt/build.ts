@@ -49,9 +49,19 @@ const TITLE_LINE: Record<PromptPhase, string> = {
     'Finish setting up Subtext in my application: identify users, link the session URL into my analytics tools, and mask sensitive data. The capture snippet is already installed.',
 };
 
-const HEADLESS_MODE_SECTION = `## Mode: autonomous (headless)
+// The report filename is per-phase so the phase-2 (enrich) run doesn't
+// overwrite the phase-1 (snippet) install report — both headless runs write in
+// the same directory, and the outro points the user at these files.
+const REPORT_FILE: Record<PromptPhase, string> = {
+  snippet: 'subtext-setup-report.md',
+  enrich: 'subtext-enrich-report.md',
+};
 
-You are running non-interactively inside the Subtext setup CLI. The user cannot answer questions mid-run. Wherever this document says to present a plan, wait for approval, or confirm before writing: do NOT wait — apply your best judgment, keep every change minimal and reviewable, and record what you did (plus anything you would have asked) in a final report written to \`./subtext-setup-report.md\`. If a step is impossible without user input, skip it and explain why in the report.`;
+function headlessModeSection(reportFile: string): string {
+  return `## Mode: autonomous (headless)
+
+You are running non-interactively inside the Subtext setup CLI. The user cannot answer questions mid-run. Wherever this document says to present a plan, wait for approval, or confirm before writing: do NOT wait — apply your best judgment, keep every change minimal and reviewable, and record what you did (plus anything you would have asked) in a final report written to \`./${reportFile}\`. If a step is impossible without user input, skip it and explain why in the report.`;
+}
 
 const INTERACTIVE_MODE_SECTION = `## Mode: interactive
 
@@ -255,7 +265,7 @@ export function buildSnippetPrompt(input: SnippetPromptInput): string {
   const headless = input.mode === 'headless';
   return renderPrompt('snippet', {
     TITLE_LINE: TITLE_LINE.snippet,
-    MODE_SECTION: headless ? HEADLESS_MODE_SECTION : INTERACTIVE_MODE_SECTION,
+    MODE_SECTION: headless ? headlessModeSection(REPORT_FILE.snippet) : INTERACTIVE_MODE_SECTION,
     TELEMETRY_SECTION: telemetrySection('snippet', input.telemetry),
     INTEGRATIONS_SECTION: '',
     SNIPPET: input.snippet,
@@ -269,7 +279,7 @@ export function buildEnrichPrompt(input: EnrichPromptInput): string {
   const headless = input.mode === 'headless';
   return renderPrompt('enrich', {
     TITLE_LINE: TITLE_LINE.enrich,
-    MODE_SECTION: headless ? HEADLESS_MODE_SECTION : INTERACTIVE_MODE_SECTION,
+    MODE_SECTION: headless ? headlessModeSection(REPORT_FILE.enrich) : INTERACTIVE_MODE_SECTION,
     TELEMETRY_SECTION: telemetrySection('enrich', input.telemetry),
     INTEGRATIONS_SECTION: integrationsSection(input.selection),
     INTEGRATION_LINKAGE_EXAMPLES: linkageExamples(input.selection),
