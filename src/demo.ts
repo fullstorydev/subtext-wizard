@@ -20,6 +20,8 @@ const DEMO_PROMPT_LINES = [
   'local dev build. Use the Subtext tools to find my most recent captured',
   'session and walk me through it: which pages I visited, what I interacted',
   'with, and anything that looked broken or confusing along the way.',
+  'If the Subtext tools return an authentication or authorization error,',
+  'stop and tell me — I likely need to sign in to Subtext in this agent first.',
 ];
 
 export const DEMO_PROMPT = DEMO_PROMPT_LINES.join(' ');
@@ -61,6 +63,8 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
         '   Subtext is capturing your session as you go.',
         `3. Open ${ctx.agentName} at this project and paste in the demo prompt`,
         '   shown below — that part is the agent\'s job.',
+        '   The first time it reaches for a Subtext tool, your agent will ask you',
+        '   to sign in to Subtext — approve it so the tools can read your sessions.',
         '',
         pc.dim('Captured sessions can take a minute or two to show up.'),
       ].join('\n'),
