@@ -330,6 +330,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         name: chosen.definition.name,
         binaryPath: chosen.binaryPath,
         macAppName: chosen.macAppName,
+        opensFolder: chosen.opensFolder,
         dir: options.dir,
       };
       if (!pluginReady) sendStart(chosen.definition.id);

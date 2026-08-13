@@ -10,6 +10,10 @@ export interface DetectedAgent {
    * found — lets us reopen the app for the demo/follow-up hand-off even when
    * there's no CLI launcher (Claude Desktop). */
   macAppName?: string;
+  /** GUI agents only: whether launching this app takes the project directory
+   * (Cursor/VS Code/Zed/Windsurf do; Claude Desktop doesn't). Controls whether
+   * a reopen passes the folder so it focuses the project vs. a blank window. */
+  opensFolder?: boolean;
   /** Extra detail shown in the picker (e.g. app bundle path). */
   detail?: string;
 }

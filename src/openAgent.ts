@@ -20,6 +20,9 @@ export interface OpenAgentTarget {
   binaryPath?: string;
   /** macOS app bundle name, for GUI agents without a CLI launcher. */
   macAppName?: string;
+  /** GUI apps only: whether this app takes the project folder on launch. When
+   * false (Claude Desktop) a reopen must not pass a path. */
+  opensFolder?: boolean;
   /** Project directory to open the agent at. */
   dir: string;
 }
@@ -85,13 +88,14 @@ async function openAgent(target: OpenAgentTarget): Promise<OpenResult> {
     return openTerminalHarness(target.binaryPath, target.dir);
   }
   try {
-    // No dir: a GUI app is already open at the project from the install
-    // hand-off, so we only need to bring it forward. Passing a folder to an app
-    // that doesn't open folders (Claude Desktop, opensFolder: false) would run
-    // `open -a Claude <path>`, which isn't how it launches.
+    // Pass the folder only for apps that open folders (Cursor/VS Code/Zed/
+    // Windsurf) so the reopen focuses the project. Folder-less apps (Claude
+    // Desktop, opensFolder: false) must not get a path — `open -a Claude <path>`
+    // isn't how it launches — so they just come to the foreground.
     await openAppAtDir({
       binaryPath: target.binaryPath,
       macAppName: target.macAppName,
+      dir: target.opensFolder ? target.dir : undefined,
     });
     return 'opened';
   } catch {
