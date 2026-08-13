@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
-import clipboard from 'clipboardy';
 import pc from 'picocolors';
 import { brandPink, readableNoteBody } from './logo.js';
+import { offerCopyAndOpen, type OpenAgentTarget } from './openAgent.js';
 
 /**
  * The wizard's closing section: a short "see it in action" guide. Capture is
@@ -41,6 +41,9 @@ export interface DemoGuideContext {
   clipboardHoldsInstallPrompt?: boolean;
   /** --yes (CI): show the guide, skip the interactive copy offer. */
   yes: boolean;
+  /** The harness to offer to open at the demo hand-off, when we know it (not
+   * the manual path). Copies the prompt and brings the agent up alongside it. */
+  openTarget?: OpenAgentTarget;
   onEvent: (event: string, properties?: Record<string, unknown>) => void;
 }
 
@@ -81,21 +84,15 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
 
   if (ctx.yes) return;
 
-  const answer = await p.confirm({
-    message: ctx.clipboardHoldsInstallPrompt
-      ? `Copy the demo prompt above to your clipboard? ${pc.dim(
-          '(replaces the install prompt currently on it)',
-        )}`
-      : 'Copy the demo prompt above to your clipboard?',
+  await offerCopyAndOpen({
+    prompt: DEMO_PROMPT,
+    agentName: ctx.agentName,
+    target: ctx.openTarget,
+    clipboardBusy: ctx.clipboardHoldsInstallPrompt,
+    label: 'demo prompt',
+    readyHint: "after you've clicked around",
+    onEvent: ctx.onEvent,
+    copiedEvent: 'demo_prompt_copied',
+    openedEvent: 'demo_agent_opened',
   });
-  if (p.isCancel(answer) || !answer) return;
-
-  try {
-    await clipboard.write(DEMO_PROMPT);
-  } catch {
-    p.log.warn('Could not write to the clipboard — copy the prompt above.');
-    return;
-  }
-  ctx.onEvent('demo_prompt_copied');
-  p.log.success(`Demo prompt copied — paste it into ${ctx.agentName} after you've clicked around.`);
 }

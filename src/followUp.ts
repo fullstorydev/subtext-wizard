@@ -1,7 +1,6 @@
 import * as p from '@clack/prompts';
-import clipboard from 'clipboardy';
-import pc from 'picocolors';
 import { brandPink, readableNoteBody } from './logo.js';
+import { offerCopyAndOpen, type OpenAgentTarget } from './openAgent.js';
 
 /**
  * The second half of setup, offered as a copyable prompt rather than a driven
@@ -24,6 +23,9 @@ export interface FollowUpContext {
   clipboardBusy?: boolean;
   /** --yes (CI): show the note, skip the interactive copy offer. */
   yes: boolean;
+  /** The harness to offer to open at the follow-up hand-off, when we know it
+   * (not the manual path). Copies the prompt and brings the agent up too. */
+  openTarget?: OpenAgentTarget;
   onEvent: (event: string, properties?: Record<string, unknown>) => void;
 }
 
@@ -55,19 +57,15 @@ export async function offerFollowUpPrompt(ctx: FollowUpContext): Promise<void> {
 
   if (ctx.yes) return;
 
-  const answer = await p.confirm({
-    message: ctx.clipboardBusy
-      ? `Copy the follow-up prompt above to your clipboard? ${pc.dim('(replaces what\'s on it now)')}`
-      : 'Copy the follow-up prompt above to your clipboard?',
+  await offerCopyAndOpen({
+    prompt: ctx.prompt,
+    agentName: ctx.agentName,
+    target: ctx.openTarget,
+    clipboardBusy: ctx.clipboardBusy,
+    label: 'follow-up prompt',
+    readyHint: "when you're ready",
+    onEvent: ctx.onEvent,
+    copiedEvent: 'phase2_followup_copied',
+    openedEvent: 'phase2_followup_opened',
   });
-  if (p.isCancel(answer) || !answer) return;
-
-  try {
-    await clipboard.write(ctx.prompt);
-  } catch {
-    p.log.warn('Could not write to the clipboard — copy the prompt above.');
-    return;
-  }
-  ctx.onEvent('phase2_followup_copied');
-  p.log.success(`Follow-up prompt copied — paste it into ${ctx.agentName} when you're ready.`);
 }

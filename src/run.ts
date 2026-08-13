@@ -8,6 +8,7 @@ import type { WizardOptions } from './config.js';
 import { WIZARD_VERSION, telemetryUrl } from './config.js';
 import { showDemoGuide } from './demo.js';
 import { offerFollowUpPrompt } from './followUp.js';
+import type { OpenAgentTarget } from './openAgent.js';
 import {
   CancelledError,
   selectIntegrations,
@@ -113,13 +114,20 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     // 4. GUI apps: set up the Subtext plugin before building the prompt. Whether
     //    the plugin is actually present decides who owns telemetry, so it must be
-    //    known before the prompt's telemetry section is chosen. Skipped for
-    //    --print-prompt, which only previews the prompt and never hands off.
+    //    known before the prompt's telemetry section is chosen.
     let pluginReady = false;
-    if (isAppRun && !options.printPrompt) {
+    if (isAppRun) {
       pluginReady = await guidePluginSetup(chosen, auth.region);
       telemetry.note('plugin_setup', { agent: chosen.definition.id, ready: pluginReady });
     }
+
+    // --print-prompt is a testing aid: it prints each install prompt to stdout
+    // right before it's used, then lets the normal flow run. It deliberately no
+    // longer overrides mode/telemetry — the printed prompt is exactly the one
+    // that runs, so a terminal agent still gets the headless variant it needs.
+    const printPromptForTesting = (label: string, prompt: string) => {
+      if (options.printPrompt) console.log(`\n===== ${label} =====\n\n${prompt}\n`);
+    };
 
     // 5. Assemble the phase-1 (snippet) install prompt. Terminal agents get the
     //    autonomous variant (no approval gates); app handoffs keep the
@@ -133,38 +141,18 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     //      `start` (below) and the prompt must not tell the agent to log one
     //      too, or a still-present plugin would double-count.
     //    Either way the wizard owns the terminal `start`/`complete` bookends.
-    //    --print-prompt always previews the manual-handoff variant (interactive,
-    //    no agent-side telemetry): a printed prompt is pasted by hand, so no
-    //    wizard is attached to parse markers and no approval gate may be skipped.
     const promptTelemetry: PromptTelemetry =
-      !telemetryEnabled || options.mock || options.printPrompt
+      !telemetryEnabled || options.mock
         ? 'none'
         : isTerminalRun
           ? 'stdout'
           : isAppRun && pluginReady
             ? 'mcp'
             : 'none';
-    const promptMode: PromptMode = isTerminalRun && !options.printPrompt ? 'headless' : 'interactive';
-
-    if (options.printPrompt) {
-      // No handoff happens here — we only print the prompts — so this must not
-      // fire a `start` event, which would inflate the funnel with runs that
-      // never began. Print both phases so the user sees the whole install they
-      // would be consenting to; integrations only steer phase 2, so use
-      // --integrations if given, else the "detect what's present" variant.
-      const selection: IntegrationSelection = options.integrations
-        ? await selectIntegrations(options)
-        : { integrations: [], other: [] };
-      console.log(buildSnippetPrompt({ snippet, mode: 'interactive', telemetry: 'none' }));
-      console.log(
-        "\n\n===== STEP 2: enrichment — run after you've seen a captured session =====\n",
-      );
-      console.log(buildEnrichPrompt({ selection, mode: 'interactive', telemetry: 'none' }));
-      await telemetry.flush();
-      return 0;
-    }
+    const promptMode: PromptMode = isTerminalRun ? 'headless' : 'interactive';
 
     const snippetPrompt = buildSnippetPrompt({ snippet, mode: promptMode, telemetry: promptTelemetry });
+    printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
 
     // For terminal agents the install runs autonomously; name what it
     // auto-approves so the single pre-handoff gate below carries that consent
@@ -243,6 +231,18 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // and never throws: a "no" here must not fail a run whose snippet is in.
     const confirmContinueEnriching = async (detail: string): Promise<boolean> => {
       if (options.yes) return true;
+      // Gate step 2 on the user finishing the demo above rather than prompting
+      // over it. The demo guide is a "leave the terminal and watch a session
+      // review" action; surfacing the enrichment decision (and its details)
+      // right on top of it competes for their attention. So hold here with a
+      // minimal prompt — keeping step 2 out of view — until they come back and
+      // signal they're ready. "No" is a clean exit for anyone done for now.
+      const ready = await p.confirm({
+        message:
+          "Try the demo above first — this waits for you. Once you've watched a session review, press Enter to finish setting up Subtext, or choose No if you're done for now.",
+        initialValue: true,
+      });
+      if (p.isCancel(ready) || !ready) return false;
       p.note(
         readableNoteBody(
           [
@@ -257,10 +257,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         ),
         'Step 2 of 2 · Enrich your Subtext setup (optional)',
       );
-      const answer = await p.confirm({
-        message: 'Would you like to continue enriching Subtext?',
-      });
-      return !p.isCancel(answer) && answer === true;
+      return true;
     };
 
     // ----- Manual handoff: copy the phase-1 prompt, then offer phase 2 as a
@@ -303,6 +300,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           mode: 'interactive',
           telemetry: 'none',
         });
+        printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
         await offerFollowUpPrompt({
           prompt: enrichPrompt,
           agentName: 'your coding agent',
@@ -323,14 +321,25 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // at all. With the plugin the agent logs its own richer start (harness +
     // model) via MCP, so the wizard stays quiet to avoid double-counting. ------
     if (isAppRun) {
-      if (!pluginReady) sendStart(chosen.definition.id);
-      const result = await chosen.definition.launch({
-        prompt: snippetPrompt,
-        cwd: options.dir,
+      const openTarget: OpenAgentTarget = {
+        kind: 'app',
+        name: chosen.definition.name,
         binaryPath: chosen.binaryPath,
-        debug: options.debug,
-        onEvent,
-      });
+        macAppName: chosen.macAppName,
+        dir: options.dir,
+      };
+      if (!pluginReady) sendStart(chosen.definition.id);
+      // --print-prompt is a dry run: the prompt was already printed above, so
+      // don't open the app / hand off — synthesize a clean handoff result.
+      const result: LaunchResult = options.printPrompt
+        ? { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false }
+        : await chosen.definition.launch({
+            prompt: snippetPrompt,
+            cwd: options.dir,
+            binaryPath: chosen.binaryPath,
+            debug: options.debug,
+            onEvent,
+          });
       telemetry.note('wizard_completed', {
         agent: chosen.definition.id,
         mode: result.mode,
@@ -342,6 +351,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         installPending: true,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
+        // Suppressed under --print-prompt so the demo's "Open agent?" offer
+        // can't launch the app during a dry run.
+        openTarget: options.printPrompt ? undefined : openTarget,
         onEvent,
       });
       if (
@@ -354,11 +366,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           mode: 'interactive',
           telemetry: 'none',
         });
+        printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
         await offerFollowUpPrompt({
           prompt: enrichPrompt,
           agentName: chosen.definition.name,
           clipboardBusy: result.clipboardHoldsPrompt,
           yes: options.yes,
+          openTarget: options.printPrompt ? undefined : openTarget,
           onEvent,
         });
       }
@@ -383,6 +397,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const driveLaunch = async (
       launchPrompt: string,
     ): Promise<{ result: LaunchResult; installSucceeded: boolean }> => {
+      if (options.printPrompt) {
+        // --print-prompt is a dry run: the prompt was already printed above, so
+        // skip actually spawning the agent and report a clean no-op so the rest
+        // of the flow (demo guide, phase-2 prompt) still runs.
+        p.log.info(pc.dim('--print-prompt — skipping the agent run.'));
+        return { result: { mode: 'ran', exitCode: 0 }, installSucceeded: true };
+      }
       const sentMarkerSteps = new Set<string>();
       let installSucceeded = false;
       const result = await chosen.definition.launch({
@@ -436,14 +457,28 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // Wire Subtext into the harness that ran the install (packaged plugin where
     // one exists, raw MCP entry otherwise) so the agent can review sessions,
     // then show the first-ASR guide. Consent was captured pre-handoff
-    // (reviewToolsConsent) so this runs without a fresh prompt.
-    await offerPluginSetup(chosen, auth.region, options, onEvent, reviewToolsConsent);
+    // (reviewToolsConsent) so this runs without a fresh prompt. Skipped under
+    // --print-prompt: the packaged-plugin path spawns the agent CLI, and a dry
+    // run must not launch the agent.
+    if (!options.printPrompt) {
+      await offerPluginSetup(chosen, auth.region, options, onEvent, reviewToolsConsent);
+    }
     await showDemoGuide({
       agentName: chosen.definition.name,
       // Exit 0 without the agent's install marker means the install may have
       // been refused or abandoned — frame the guide as post-install work.
       installPending: !installConfirmed,
       yes: options.yes,
+      // Suppressed under --print-prompt so the demo's "Open agent?" offer can't
+      // spawn the agent during a dry run.
+      openTarget: options.printPrompt
+        ? undefined
+        : {
+            kind: 'terminal',
+            name: chosen.definition.name,
+            binaryPath: chosen.binaryPath,
+            dir: options.dir,
+          },
       onEvent,
     });
 
@@ -463,6 +498,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           mode: 'headless',
           telemetry: promptTelemetry,
         });
+        printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
         const { result: enrichResult } = await driveLaunch(enrichPrompt);
         telemetry.note('phase2_completed', { exit_code: enrichResult.exitCode ?? null });
         if (enrichResult.exitCode !== 0) {

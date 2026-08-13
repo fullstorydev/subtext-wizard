@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as p from '@clack/prompts';
 import type { WizardOptions } from './config.js';
+import { brandPink } from './logo.js';
 
 export interface Integration {
   id: string;
@@ -190,20 +191,43 @@ export async function selectIntegrations(
     return { integrations, other };
   }
 
-  const OTHER = '__other__';
-  // Pre-select tools we can see in package.json; the user can still uncheck
-  // them or add others. When nothing is detected the picker opens with nothing
-  // checked — same as before — and leaving it empty hands detection to the
-  // agent (its Step 2 explore).
+  // Detection only sees npm packages. When it finds something, confirm those
+  // up front and keep the 15-item catalog collapsed behind a simple "any
+  // others?" — showing every option next to a single detected tool is just
+  // noise. Saying no is safe: the agent's own Step 2 explore still detects SDKs
+  // we can't see here (script-tag / CDN installs).
   const detected = detectInstalledIntegrations(options.dir);
-  const detectedIds = new Set(detected.map((i) => i.id));
   if (detected.length > 0) {
-    p.log.info(
-      `Found in package.json: ${detected
-        .map((i) => i.label)
-        .join(', ')} — pre-selected below. Add any others we should link.`,
+    const names = detected.map((i) => brandPink(i.label)).join(', ');
+    p.log.success(
+      `Detected ${names} in package.json — Subtext will link session URLs into ${
+        detected.length > 1 ? 'them' : 'it'
+      }.`,
     );
+    const addMore = await p.confirm({
+      message: 'Add any other analytics or product tools to link?',
+      initialValue: false,
+    });
+    if (p.isCancel(addMore)) throw new CancelledError();
+    if (!addMore) return { integrations: detected, other: [] };
+    // Expanded view: the full catalog, detected tools pre-checked so they stay
+    // selected (and a false positive can be unchecked).
+    return promptIntegrationPicker(detected);
   }
+
+  return promptIntegrationPicker([]);
+}
+
+/**
+ * The full catalog multiselect (plus a free-text "Other"), with `preselected`
+ * tools pre-checked. Used both for the no-detection case (nothing checked) and
+ * the "add others" expansion after a detection (detected tools checked).
+ */
+async function promptIntegrationPicker(
+  preselected: Integration[],
+): Promise<IntegrationSelection> {
+  const OTHER = '__other__';
+  const preselectedIds = new Set(preselected.map((i) => i.id));
   const picked = await p.multiselect({
     message:
       'Which analytics or product tools does this app use? Subtext will link session URLs into each one. (space to toggle, enter to confirm)',
@@ -211,11 +235,11 @@ export async function selectIntegrations(
       ...INTEGRATIONS.map((i) => ({
         value: i.id,
         label: i.label,
-        hint: detectedIds.has(i.id) ? 'detected' : undefined,
+        hint: preselectedIds.has(i.id) ? 'detected' : undefined,
       })),
       { value: OTHER, label: 'Other', hint: 'name a tool not listed' },
     ],
-    initialValues: detected.length > 0 ? detected.map((i) => i.id) : undefined,
+    initialValues: preselected.length > 0 ? preselected.map((i) => i.id) : undefined,
     required: false,
   });
   if (p.isCancel(picked)) {

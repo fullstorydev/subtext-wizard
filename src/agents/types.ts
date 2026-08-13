@@ -6,6 +6,10 @@ export interface DetectedAgent {
   definition: AgentDefinition;
   /** Path to the CLI binary, when one was found. */
   binaryPath?: string;
+  /** macOS app bundle name for GUI agents (e.g. "Cursor"), when the bundle was
+   * found — lets us reopen the app for the demo/follow-up hand-off even when
+   * there's no CLI launcher (Claude Desktop). */
+  macAppName?: string;
   /** Extra detail shown in the picker (e.g. app bundle path). */
   detail?: string;
 }
