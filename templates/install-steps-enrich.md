@@ -2,11 +2,9 @@
 
 The Subtext capture snippet should already be installed from the earlier snippet step. Confirm it before doing anything else:
 
-- Read `package.json` for `@fullstory/browser`, `@fullstory/react-native`, `@fullstory/snippet`, or `@subtextdev/hydrogen`, or find the snippet's script tag / `init({ orgId })` call in the entry point.
+- Read `package.json` for `@fullstory/browser`, `@fullstory/react-native`, or `@fullstory/snippet`, or find the snippet's script tag / `init({ orgId })` call in the entry point.
 
 If you cannot find the snippet, stop and tell the user to run the Subtext snippet install first — do not proceed with the steps below.
-
-Note the framework and, for Shopify Hydrogen (`@subtextdev/hydrogen`), that identity and analytics linkage are handled by the wrapper component (`useSubtextIdentity` / `<SubtextAnalytics onSessionUrl={…}>`) rather than raw `FS(...)` calls — Steps 4 and 5 tell you how to handle that case.
 
 ## Step 2: Explore existing analytics
 
@@ -45,8 +43,6 @@ FS('setIdentity', {
   }
 });
 ```
-
-For Shopify Hydrogen (`@subtextdev/hydrogen`): use the package's `useSubtextIdentity(customer && {uid: customer.id, displayName, email})` hook where the authenticated customer is available on the client (typically the account route), instead of a raw `FS('setIdentity')` call. If identity is already wired via this hook, report `skipped` and move on.
 
 1. Find the place in the codebase where the authenticated user becomes available — login success handler, auth provider, session bootstrap, `getServerSideProps`, or equivalent. Do NOT call `setIdentity` for anonymous visitors.
 2. **In React-based apps, `setIdentity` MUST be called inside a `useEffect` that fires when the authenticated user changes — not on every render and not at module top-level.** Typical shape:
@@ -90,8 +86,6 @@ For each analytics tool detected in Step 2, attach the current Subtext URL to th
 3. If a shared analytics wrapper module exists, attach the property there once rather than at every call site.
 4. The session URL can change across sessions — re-attach whenever a new session starts or when the user is re-identified.
 5. Do NOT install new analytics tools. Only attach to tools already present in the app.
-
-For Shopify Hydrogen (`@subtextdev/hydrogen`): pass `onSessionUrl` to `<SubtextAnalytics>` instead of calling `FS('getSession')` directly — it fires with the session URL every time capture starts, which with consent gating can be well after page load: `<SubtextAnalytics onSessionUrl={(url) => { /* attach subtext_url to each detected tool here */ }} />`. If linkage is already wired this way, report `skipped` and move on.
 
 ## Step 6: Mask sensitive data
 
