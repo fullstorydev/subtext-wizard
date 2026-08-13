@@ -27,7 +27,8 @@ Options:
                           (posthog, amplitude, mixpanel, statsig, sentry, logrocket,
                           datadog, launchdarkly, growthbook, intercom, pendo, appcues,
                           userpilot, sprig, segment — unknown names become "Other")
-  --print-prompt          Build and print the install prompt instead of launching
+  --print-prompt          Print each install prompt to stdout as it's built, then
+                          continue the normal flow (testing aid)
   --yes                   Skip the pre-launch confirmation (for CI/non-interactive
                           use). The agent runs autonomously against --dir with
                           edits — and, depending on the agent, command execution —
