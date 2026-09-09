@@ -28,6 +28,9 @@ Options:
                           datadog, launchdarkly, growthbook, intercom, pendo, appcues,
                           userpilot, sprig, segment — unknown names become "Other")
   --print-prompt          Build and print the install prompt instead of launching
+  --sightmap              Also build a .sightmap/ component corpus so session
+                          reviews name your UI. Offered interactively by default;
+                          this flag opts in for unattended --yes runs.
   --yes                   Skip the pre-launch confirmation (for CI/non-interactive
                           use). The agent runs autonomously against --dir with
                           edits — and, depending on the agent, command execution —
@@ -57,6 +60,7 @@ function main(): void {
         agent: { type: 'string' },
         integrations: { type: 'string' },
         'print-prompt': { type: 'boolean', default: false },
+        sightmap: { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
         mock: { type: 'boolean', default: false },
         'no-telemetry': { type: 'boolean', default: false },
@@ -106,6 +110,7 @@ function main(): void {
       .map((s) => s.trim())
       .filter(Boolean),
     printPrompt: values['print-prompt'] ?? false,
+    sightmap: values.sightmap ?? false,
     yes: values.yes ?? false,
     mock: values.mock ?? false,
     // Telemetry is on by default; both the explicit --no-telemetry flag and the

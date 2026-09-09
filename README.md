@@ -32,6 +32,7 @@ npx @subtextdev/subtext-wizard
 3. **Asks about your stack** — pick the analytics and product tools you use (PostHog, Amplitude, Mixpanel, Sentry, Segment, and more) so setup can link them up.
 4. **Finds your coding agent** — detects Claude Code, Codex, Gemini CLI, Cursor, Windsurf, VS Code, Zed, or Claude Desktop.
 5. **Hands the install to your own agent** — no bundled agent; it drives the one you already use to wire up the capture snippet, MCP server, skills, and commands.
+6. **Offers to build a sightmap** — optionally installs the [`@sightmap/sightmap`](https://docs.sightmap.org/start/quickstart) CLI and has your agent seed a `.sightmap/` component corpus, so later session reviews name your UI ("add-to-cart button") instead of showing raw selectors.
 
 When it finishes, your agent is connected to your sessions. See the [Subtext repo](https://github.com/fullstorydev/subtext) for what it can do from there.
 
@@ -45,6 +46,9 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
 --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
                         windsurf, vscode, zed, claude-desktop, manual)
 --integrations <list>   Comma-separated tools to target, skips the picker
+--sightmap              Also build a .sightmap/ component corpus so reviews name
+                        your UI. Offered interactively by default; this flag opts
+                        in for unattended --yes runs.
 --print-prompt          Print the install prompt instead of launching an agent
 --no-telemetry          Opt out of telemetry. Anonymous install telemetry (step
                         progress, outcomes, timings, and agent token usage;
