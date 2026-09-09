@@ -228,5 +228,8 @@ export interface WizardOptions {
   printPrompt: boolean;
   /** Skip the pre-launch confirmation (non-interactive/CI use). */
   yes: boolean;
+  /** Opt into building a sightmap corpus under --yes. Interactive runs are
+   * always offered it; this only matters for unattended CI runs. */
+  sightmap: boolean;
   debug: boolean;
 }
