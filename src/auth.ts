@@ -7,10 +7,12 @@ import pc from 'picocolors';
 import {
   AUTH_CALLBACK_TIMEOUT_MS,
   AUTH_PROMPT_AFTER_MS,
+  ME_PATH,
   OAUTH_AUTHORIZE_PATH,
   OAUTH_REGISTER_PATH,
   OAUTH_SCOPES,
   OAUTH_TOKEN_PATH,
+  apiBaseUrl,
   authBaseUrl,
   oauthClientId,
   subtextOauthResource,
@@ -20,6 +22,12 @@ import {
 
 export interface SubtextAuth {
   accessToken: string;
+  /**
+   * Scheme for the `Authorization` header on API calls. OAuth access tokens go
+   * as `Bearer`; normal API keys go as `Basic` (Fullstory's documented form for
+   * keys). Everything downstream reads this instead of hardcoding a scheme.
+   */
+  authScheme: 'Bearer' | 'Basic';
   refreshToken?: string;
   orgId: string;
   userEmail?: string;
@@ -47,22 +55,29 @@ export async function authenticate(
   openBrowser = true,
 ): Promise<SubtextAuth> {
   if (options.apiKey) {
-    p.log.info('Using the token you provided — skipping browser login.');
+    p.log.info('Using the credential you provided — skipping browser login.');
+    // An OAuth access token carries org_id in its JWT, so we can use it as-is.
+    // A normal API key is opaque and needs a /me lookup to resolve its org.
     const claims = decodeTokenClaims(options.apiKey);
-    if (!claims?.orgId) {
-      // Non-OAuth API keys are org-scoped but opaque; there is no public
-      // endpoint to resolve the org id from a key yet (see plan doc).
+    if (claims?.orgId) {
+      return {
+        accessToken: options.apiKey,
+        authScheme: 'Bearer',
+        orgId: claims.orgId,
+        userEmail: claims.userEmail,
+        region: claims.region ?? options.region,
+      };
+    }
+    if (options.apiKeyKind === 'oauth') {
+      // --api-key-oauth promises an OAuth token but this one didn't decode.
+      // Don't silently fall through to the /me path — that's what --api-key is
+      // for; the caller asked for the strict OAuth behavior.
       throw new Error(
-        '--api-key must be an OAuth access token issued by auth.fullstory.com. ' +
-          'Run without --api-key to log in through the browser instead.',
+        '--api-key-oauth must be an OAuth access token issued by auth.fullstory.com. ' +
+          'Use --api-key for a normal Fullstory API key.',
       );
     }
-    return {
-      accessToken: options.apiKey,
-      orgId: claims.orgId,
-      userEmail: claims.userEmail,
-      region: claims.region ?? options.region,
-    };
+    return resolveApiKey(options.apiKey, options);
   }
 
   if (options.mock) {
@@ -73,6 +88,7 @@ export async function authenticate(
     spinner.stop('Logged in as demo@example.com (mock)');
     return {
       accessToken: 'subtext_mock_token',
+      authScheme: 'Bearer',
       orgId: 'o-1G1-na1',
       userEmail: 'demo@example.com',
       region: 'us',
@@ -159,11 +175,97 @@ export async function authenticate(
 
   return {
     accessToken: token.access_token,
+    authScheme: 'Bearer',
     refreshToken: token.refresh_token,
     orgId: claims.orgId,
     userEmail: claims.userEmail,
     region: claims.region ?? options.region,
   };
+}
+
+/**
+ * Resolve a normal (non-OAuth) Fullstory API key to its org via `GET /me`.
+ * An API key is opaque — the only way to learn its org id is to ask the
+ * server — so we send `Authorization: Basic <key>` (Fullstory's documented
+ * form for API keys) and read `orgId` back.
+ */
+async function resolveApiKey(apiKey: string, options: WizardOptions): Promise<SubtextAuth> {
+  if (options.mock) {
+    // A normal key can't be decoded locally, and --mock forbids network calls,
+    // so hand back the canned org and let the rest of the flow run offline.
+    return {
+      accessToken: apiKey,
+      authScheme: 'Basic',
+      orgId: 'o-1G1-na1',
+      userEmail: 'demo@example.com',
+      region: 'us',
+    };
+  }
+
+  // The realm prefix (na1./eu1.) picks the API host; legacy keys have none, so
+  // fall back to --region. The org id from /me settles the realm either way.
+  const region = regionFromApiKey(apiKey) ?? options.region;
+  const url = `${apiBaseUrl(region)}${ME_PATH}`;
+
+  const spinner = p.spinner();
+  spinner.start('Validating your API key…');
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { Authorization: `Basic ${apiKey}` },
+      signal: AbortSignal.timeout(10_000),
+    });
+  } catch (error) {
+    spinner.stop('Could not validate the API key.', 1);
+    throw new Error(
+      `Could not reach ${url} to validate --api-key: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    spinner.stop('API key rejected.', 1);
+    throw new Error(
+      `--api-key was rejected (${res.status}). Check that it is a valid Fullstory API key` +
+        ', and for a legacy org key that --region matches the org’s data center.',
+    );
+  }
+  if (!res.ok) {
+    spinner.stop('Could not validate the API key.', 1);
+    throw new Error(`Validating --api-key failed: ${ME_PATH} returned ${res.status}.`);
+  }
+
+  const body = (await res.json().catch(() => null)) as {
+    orgId?: string;
+    email?: string;
+  } | null;
+  if (!body?.orgId) {
+    spinner.stop('Could not validate the API key.', 1);
+    throw new Error(`The ${ME_PATH} response did not include an orgId — cannot continue.`);
+  }
+
+  // The org id is authoritative for the realm: EU orgs carry the -eu1 suffix.
+  const resolvedRegion: Region = body.orgId.endsWith('-eu1') ? 'eu' : region;
+  spinner.stop(`API key valid${body.email ? ` for ${body.email}` : ''} (org ${body.orgId}).`);
+
+  return {
+    accessToken: apiKey,
+    authScheme: 'Basic',
+    orgId: body.orgId,
+    userEmail: body.email || undefined,
+    region: resolvedRegion,
+  };
+}
+
+/** Realm from an API key's prefix (na1./eu1.), or undefined for a legacy key
+ * that carries no realm. */
+function regionFromApiKey(apiKey: string): Region | undefined {
+  const prefix = apiKey.split('.', 1)[0];
+  if (prefix === 'eu1') return 'eu';
+  if (prefix === 'na1') return 'us';
+  return undefined;
 }
 
 /**

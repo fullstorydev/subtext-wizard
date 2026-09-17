@@ -4,7 +4,8 @@ import { WIZARD_VERSION } from './config.js';
  * Fire-and-forget telemetry against the real `/subtext/telemetry` endpoint.
  * The endpoint accepts a protojson `WorkflowEvent` and
  * requires an authenticated session, so nothing can be delivered until the
- * user has logged in — call authorize() with the OAuth access token first.
+ * user has logged in — call authorize() with the credential (OAuth token or
+ * API key) and its scheme first.
  * Events are POSTed in the background as they happen; nothing ever blocks the
  * wizard and failures are swallowed. A final flush() with a short deadline
  * runs at exit.
@@ -58,6 +59,7 @@ export interface WorkflowEventMetadata {
 export class Telemetry {
   private endpoint?: string;
   private accessToken?: string;
+  private authScheme: 'Bearer' | 'Basic' = 'Bearer';
   private startSent = false;
   private pending: Promise<unknown>[] = [];
   private readonly startedAt = Date.now();
@@ -70,9 +72,10 @@ export class Telemetry {
   /** Enable delivery once the user is logged in. Events fired before this
    * are dropped (visible under --debug) — the endpoint rejects
    * unauthenticated requests, so there is nowhere to send them. */
-  authorize(endpoint: string, accessToken: string): void {
+  authorize(endpoint: string, accessToken: string, authScheme: 'Bearer' | 'Basic' = 'Bearer'): void {
     this.endpoint = endpoint;
     this.accessToken = accessToken;
+    this.authScheme = authScheme;
   }
 
   /**
@@ -101,7 +104,7 @@ export class Telemetry {
     const req = fetch(this.endpoint, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
+        Authorization: `${this.authScheme} ${this.accessToken}`,
         'Content-Type': 'application/json',
         'User-Agent': `subtext-wizard/${WIZARD_VERSION}`,
       },

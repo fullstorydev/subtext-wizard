@@ -41,7 +41,10 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
 
 ```
 --dir <path>            App directory to instrument (default: current directory)
---api-key <key>         Skip the browser login and use this access token
+--api-key <key>         Skip the browser login and authenticate with a Fullstory
+                        API key or OAuth access token (auto-detected)
+--api-key-oauth <token> Like --api-key, but always treats the value as an OAuth
+                        access token (mutually exclusive with --api-key)
 --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
                         windsurf, vscode, zed, claude-desktop, manual)
 --integrations <list>   Comma-separated tools to target, skips the picker
