@@ -31,7 +31,8 @@ function instructions(agentId: string, agentName: string, mcpUrl: string, region
       default:
         return [
           'This org is in the EU data region. The Subtext plugin only includes the NA MCP server.',
-          `Add the EU MCP server to ${agentName}'s MCP settings:\n${mcpUrl}`,
+          'Install the Subtext skills:  npx openskills install fullstorydev/subtext',
+          `Then add the EU MCP server to ${agentName}'s MCP settings:\n${mcpUrl}`,
         ].join('\n');
     }
   }

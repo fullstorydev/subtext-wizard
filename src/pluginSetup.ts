@@ -619,6 +619,17 @@ export async function offerPluginSetup(
       return;
     }
     if (plugin && region === 'eu') {
+      // The packaged plugin ships the NA server only. If an earlier run (or a
+      // manual install) left it in place, it keeps loading the NA endpoint next
+      // to the EU one we're about to write: duplicate tools pointed at the
+      // wrong realm. We can't uninstall it for the user, so flag it rather than
+      // add the EU server silently beside it.
+      if (!options.mock && (await plugin.alreadyInstalled())) {
+        p.log.warn(
+          `The Subtext plugin is installed in ${chosen.definition.name}, but it only includes the NA MCP server. ` +
+            'Remove it so this EU org talks only to the EU server.',
+        );
+      }
       p.log.info(pc.dim(`${EU_PLUGIN_IS_NA_ONLY} Adding the EU server directly.`));
     }
   }
