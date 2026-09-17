@@ -17,10 +17,16 @@ Usage:
 
 Options:
   --dir <path>            App directory to instrument (default: current directory)
-  --api-key <key>         Skip the browser login and use this OAuth access token.
-                          Prefer the SUBTEXT_API_KEY env var — an --api-key on
-                          the command line lands in shell history and is visible
-                          to other local users via the process list.
+  --api-key <key>         Skip the browser login and authenticate with this
+                          credential: a Fullstory API key or an OAuth access
+                          token (auto-detected). Prefer the SUBTEXT_API_KEY env
+                          var — an --api-key on the command line lands in shell
+                          history and is visible to other local users via the
+                          process list.
+  --api-key-oauth <token> Like --api-key, but always treats the value as an
+                          OAuth access token (the wizard's original behavior).
+                          Env var: SUBTEXT_API_KEY_OAUTH. Mutually exclusive
+                          with --api-key.
   --agent <id>            Skip the agent picker (claude-code, codex, gemini, cursor,
                           windsurf, vscode, zed, claude-desktop, manual)
   --integrations <list>   Comma-separated integrations to target, skips the picker
@@ -54,6 +60,7 @@ function main(): void {
       options: {
         dir: { type: 'string' },
         'api-key': { type: 'string' },
+        'api-key-oauth': { type: 'string' },
         agent: { type: 'string' },
         integrations: { type: 'string' },
         'print-prompt': { type: 'boolean', default: false },
@@ -88,18 +95,23 @@ function main(): void {
     process.exit(1);
   }
 
+  // --api-key auto-detects a Fullstory API key vs an OAuth access token;
+  // --api-key-oauth forces the OAuth-token path (the wizard's original
+  // --api-key behavior). The two flags are mutually exclusive.
+  if (values['api-key'] && values['api-key-oauth']) {
+    console.error('Pass only one of --api-key or --api-key-oauth, not both.');
+    process.exit(2);
+  }
+  const mock = values.mock ?? false;
+  const { apiKey, apiKeyKind } = resolveCredential(values, mock);
+
   const options: WizardOptions = {
     dir: path.resolve(values.dir ?? process.cwd()),
     // EU is not supported yet; default to the US region. The --region flag is
     // intentionally not exposed until EU support ships.
     region: 'us',
-    // Prefer the env var so a token need not appear in argv (shell history /
-    // process list). An explicit --api-key still wins if both are set. Under
-    // --mock the env var is ignored entirely — a SUBTEXT_API_KEY left in the
-    // shell would otherwise be validated (and could reject) or short-circuit
-    // the canned mock auth, derailing offline test runs. An explicit --api-key
-    // is still honored under --mock for anyone testing that path on purpose.
-    apiKey: values['api-key'] ?? (values.mock ? undefined : process.env.SUBTEXT_API_KEY),
+    apiKey,
+    apiKeyKind,
     agent: values.agent,
     integrations: values.integrations
       ?.split(',')
@@ -107,7 +119,7 @@ function main(): void {
       .filter(Boolean),
     printPrompt: values['print-prompt'] ?? false,
     yes: values.yes ?? false,
-    mock: values.mock ?? false,
+    mock,
     // Telemetry is on by default; both the explicit --no-telemetry flag and the
     // standard DO_NOT_TRACK / DISABLE_TELEMETRY env vars opt out. The env-var
     // opt-out is honored silently here (no prompt, no network call downstream).
@@ -121,6 +133,28 @@ function main(): void {
       console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
       process.exit(1);
     });
+}
+
+/**
+ * Resolve which credential the wizard authenticates with, and how. Flags beat
+ * env vars so a credential need not appear in argv (shell history / process
+ * list); the -oauth forms force the OAuth-token path, the plain forms
+ * auto-detect. Under --mock the env vars are ignored entirely — a
+ * SUBTEXT_API_KEY* left in the shell would otherwise be validated (and could
+ * reject) or short-circuit the canned mock auth. An explicit flag is still
+ * honored under --mock for anyone testing that path on purpose.
+ */
+function resolveCredential(
+  values: { 'api-key'?: string; 'api-key-oauth'?: string },
+  mock: boolean,
+): { apiKey?: string; apiKeyKind: 'auto' | 'oauth' } {
+  if (values['api-key-oauth']) return { apiKey: values['api-key-oauth'], apiKeyKind: 'oauth' };
+  if (values['api-key']) return { apiKey: values['api-key'], apiKeyKind: 'auto' };
+  if (mock) return { apiKeyKind: 'auto' };
+  if (process.env.SUBTEXT_API_KEY_OAUTH)
+    return { apiKey: process.env.SUBTEXT_API_KEY_OAUTH, apiKeyKind: 'oauth' };
+  if (process.env.SUBTEXT_API_KEY) return { apiKey: process.env.SUBTEXT_API_KEY, apiKeyKind: 'auto' };
+  return { apiKeyKind: 'auto' };
 }
 
 main();

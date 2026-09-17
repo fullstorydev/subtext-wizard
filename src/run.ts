@@ -28,8 +28,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
   );
   if (options.mock) {
     p.log.warn('Mock mode: no real network calls will be made.');
-    if (!options.apiKey && process.env.SUBTEXT_API_KEY) {
-      p.log.warn('Ignoring SUBTEXT_API_KEY in mock mode — using canned auth.');
+    if (!options.apiKey) {
+      const ignored = ['SUBTEXT_API_KEY', 'SUBTEXT_API_KEY_OAUTH'].filter((n) => process.env[n]);
+      if (ignored.length > 0) {
+        p.log.warn(`Ignoring ${ignored.join(' and ')} in mock mode — using canned auth.`);
+      }
     }
   }
 
@@ -76,7 +79,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // is lost by asking after the snippet fetch. Mock runs never send real
     // events.
     if (telemetryEnabled && !options.mock) {
-      telemetry.authorize(telemetryUrl(auth.region), auth.accessToken);
+      telemetry.authorize(telemetryUrl(auth.region), auth.accessToken, auth.authScheme);
     }
 
     // 3. Which integrations should the agent look for? The selection only
