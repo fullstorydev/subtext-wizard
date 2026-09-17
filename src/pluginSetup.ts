@@ -630,6 +630,14 @@ export async function offerPluginSetup(
             'Remove it so this EU org talks only to the EU server.',
         );
       }
+      // The NA Claude Code plugin bundles the review skills; EU orgs skip it and
+      // get a tools-only MCP entry below, so point them at openskills for the
+      // skills. (The Gemini extension is MCP-only, so it has nothing to add.)
+      if (chosen.definition.id === 'claude-code') {
+        p.log.info(
+          'The Subtext plugin also installs review skills. Add them for this EU org with:  npx openskills install fullstorydev/subtext',
+        );
+      }
       p.log.info(pc.dim(`${EU_PLUGIN_IS_NA_ONLY} Adding the EU server directly.`));
     }
   }
@@ -643,7 +651,9 @@ export async function offerPluginSetup(
         : pluginInstructions(agentId, region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'instructions' });
     p.note(
-      [region === 'eu' ? EU_PLUGIN_IS_NA_ONLY : WHY_PLUGIN, '', ...lines].join('\n'),
+      // The EU instruction builders already open with EU_PLUGIN_IS_NA_ONLY, so
+      // don't repeat it as the header; only NA needs the WHY_PLUGIN preamble.
+      region === 'eu' ? lines.join('\n') : [WHY_PLUGIN, '', ...lines].join('\n'),
       region === 'eu' ? 'Add the EU Subtext MCP server' : 'Add the Subtext plugin',
     );
     return;

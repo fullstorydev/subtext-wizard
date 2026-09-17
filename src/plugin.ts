@@ -19,7 +19,8 @@ function instructions(agentId: string, agentName: string, mcpUrl: string, region
       case 'cursor':
         return [
           'This org is in the EU data region. The Subtext marketplace plugin only includes the NA MCP server.',
-          'Add the EU MCP server in Cursor Settings → MCP:',
+          'Install the Subtext skills:  npx openskills install fullstorydev/subtext',
+          'Then add the EU MCP server in Cursor Settings → MCP:',
           mcpUrl,
         ].join('\n');
       case 'claude-desktop':
