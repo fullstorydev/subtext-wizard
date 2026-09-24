@@ -39,10 +39,11 @@ const OUTCOMES: ReadonlySet<string> = new Set<WorkflowOutcome>([
 ]);
 
 /** Per-field allowlist for marker metadata — the agent-reportable subset of
- * WorkflowEventMetadata (telemetry.ts) with its expected type. `harness` and
- * `model` are deliberately absent: the wizard stamps harness itself, so a
- * forged marker can never override attribution. Unknown keys and wrong-typed
- * values are dropped, strings and arrays are capped. */
+ * WorkflowEventMetadata (telemetry.ts) with its expected type. `harness`,
+ * `model`, and `token_source` are deliberately absent: the wizard stamps those
+ * itself, so a forged marker can never override attribution or claim that a
+ * self-estimated `tokens` count came from the harness. Unknown keys and
+ * wrong-typed values are dropped, strings and arrays are capped. */
 const METADATA_FIELDS: Record<string, 'boolean' | 'number' | 'string' | 'string[]'> = {
   duration_ms: 'number',
   tokens: 'number',
