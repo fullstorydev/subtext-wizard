@@ -108,8 +108,11 @@ const ENRICH_STEPS: StepRow[] = [
   { label: 'Step 6', step: 'mask_pii' },
 ];
 
-/** The MCP-only complete row (the wizard owns `complete` for terminal runs). */
-const COMPLETE_ROW = '| Final | `complete` | `total_duration_ms` (int), `total_tokens` (int) |';
+/** The MCP-only complete row (the wizard owns `complete` for terminal runs).
+ * No token field: a model's estimate of its own usage is guesswork, and mixing
+ * it with the real counts the wizard reads out of Claude Code's result stream
+ * would make the metric unreadable. See token_source in telemetry.ts. */
+const COMPLETE_ROW = '| Final | `complete` | `total_duration_ms` (int) |';
 
 function stepTable(rows: StepRow[], includeComplete: boolean): string {
   const lines = [
@@ -136,7 +139,7 @@ Log one event before the first step — \`workflow="onboard" step="start"\` with
 
 ${stepTable(rows, includeComplete)}
 
-Every event's metadata may also include \`duration_ms\` (int) and \`tokens\` (int) for that step when you can estimate them. Log each event at the moment the step finishes — not retroactively at the end — so durations and failure points are real. Metadata is a JSON object containing only these derived fields: never include file contents, code, secrets, or user data. Telemetry is fire-and-forget: if the tool is unavailable (e.g. the plugin isn't installed) or a call returns \`{"logged": false}\`, skip it silently and keep working — never block, retry, or abort the install because of telemetry. Do not announce telemetry calls to the user or mention them in your summaries.`;
+Every event's metadata may also include \`duration_ms\` (int) for that step when you can estimate it. Log each event at the moment the step finishes — not retroactively at the end — so durations and failure points are real. Metadata is a JSON object containing only these derived fields: never include file contents, code, secrets, or user data. Telemetry is fire-and-forget: if the tool is unavailable (e.g. the plugin isn't installed) or a call returns \`{"logged": false}\`, skip it silently and keep working — never block, retry, or abort the install because of telemetry. Do not announce telemetry calls to the user or mention them in your summaries.`;
 }
 
 /**

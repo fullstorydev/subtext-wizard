@@ -14,6 +14,11 @@ import { WIZARD_VERSION } from './config.js';
  * - No run-correlation id on WorkflowEvent, so wizard-side and agent-side
  *   events from one run can only be joined by org/email/time.
  * - No wizard-version or error-message metadata fields.
+ * - No field for the harness's own run accounting beyond tokens: cost
+ *   (`total_cost_usd`), turn count, and the Claude Code result subtype that
+ *   says whether a run finished or hit the turn limit all go to note() only.
+ * - `token_source` is new on the metadata proto; if the endpoint rejects
+ *   unknown metadata fields, it needs adding there before these events land.
  * - Events fired before login (e.g. auth failures) cannot be delivered at all.
  */
 
@@ -41,6 +46,12 @@ export type WorkflowOutcome = 'success' | 'partial' | 'fail' | 'skipped';
 export interface WorkflowEventMetadata {
   duration_ms?: number;
   tokens?: number;
+  /** Where the token counts on this event came from. 'harness' is read out of
+   * the agent CLI's own structured stream (Claude Code's stream-json result
+   * event) and is the real number; 'agent' is the model's own estimate, which
+   * runs high or low by a lot; 'none' means the harness exposes nothing to
+   * read. Token counts are not comparable across harnesses without it. */
+  token_source?: 'harness' | 'agent' | 'none';
   harness?: string;
   model?: string;
   already_installed?: boolean;
