@@ -282,6 +282,14 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         installPending: true,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
+        openTarget: {
+          kind: 'app',
+          name: chosen.definition.name,
+          binaryPath: chosen.binaryPath,
+          macAppName: chosen.macAppName,
+          opensFolder: chosen.opensFolder,
+          dir: options.dir,
+        },
         onEvent: (event, properties) => telemetry.note(event, properties),
       });
       p.outro('Finish the install in your agent — it will guide you from here.');
@@ -297,6 +305,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         // been refused or abandoned — frame the guide as post-install work.
         installPending: !installConfirmed,
         yes: options.yes,
+        openTarget: {
+          kind: 'terminal',
+          name: chosen.definition.name,
+          binaryPath: chosen.binaryPath,
+          dir: options.dir,
+        },
         onEvent: (event, properties) => telemetry.note(event, properties),
       });
       p.outro(
