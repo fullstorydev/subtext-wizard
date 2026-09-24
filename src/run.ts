@@ -12,6 +12,7 @@ import { guidePluginSetup } from './plugin.js';
 import { offerPluginSetup } from './pluginSetup.js';
 import { buildInstallPrompt, type PromptTelemetry } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
+import { offerSightmapSetup } from './sightmap.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { Telemetry } from './telemetry.js';
 
@@ -198,6 +199,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, (event, properties) =>
         telemetry.note(event, properties),
       );
+      await offerSightmapSetup(MANUAL_CHOICE, options, (event, properties) =>
+        telemetry.note(event, properties),
+      );
       await showDemoGuide({
         agentName: 'your coding agent',
         installPending: true,
@@ -277,6 +281,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     if (result.mode === 'handoff') {
       p.note(result.followUp?.join('\n') ?? '', 'Next steps');
+      await offerSightmapSetup(chosen, options, (event, properties) =>
+        telemetry.note(event, properties),
+      );
       await showDemoGuide({
         agentName: chosen.definition.name,
         installPending: true,
@@ -297,6 +304,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       // Terminal run finished — wire Subtext into the harness that ran it
       // (packaged plugin where one exists, raw MCP entry otherwise).
       await offerPluginSetup(chosen, auth.region, options, (event, properties) =>
+        telemetry.note(event, properties),
+      );
+      await offerSightmapSetup(chosen, options, (event, properties) =>
         telemetry.note(event, properties),
       );
       await showDemoGuide({
