@@ -337,13 +337,18 @@ async function registerClient(authBase: string): Promise<string> {
   return body.client_id;
 }
 
-interface CallbackResult {
+export interface CallbackResult {
   code?: string;
   state?: string;
   error?: string;
 }
 
-async function startCallbackServer(expectedState: string): Promise<{
+/**
+ * Loopback server for the OAuth redirect (RFC 8252). Exported for tests:
+ * the state filtering below is a security boundary and is worth exercising
+ * directly rather than only through a full authenticate() run.
+ */
+export async function startCallbackServer(expectedState: string): Promise<{
   server: http.Server;
   port: number;
   callbackPromise: Promise<CallbackResult>;
