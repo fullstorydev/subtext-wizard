@@ -7,6 +7,7 @@ import { runTerminalAgent } from './agents/helpers.js';
 import { MANUAL_CHOICE } from './agents/index.js';
 import type { DetectedAgent } from './agents/types.js';
 import type { Region, WizardOptions } from './config.js';
+import { readableNoteBody } from './logo.js';
 import { subtextMcpUrl } from './plugin.js';
 
 /**
@@ -437,7 +438,7 @@ async function applyConfigWrite(
   if (outcome === 'unparseable') {
     onEvent('plugin_setup_failed', { agent: agentId });
     p.log.warn(`Could not update ${shownPath} — it may have a format we can't merge safely.`);
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), 'Add it by hand');
     return;
   }
   onEvent('plugin_setup_completed', { agent: agentId, method });
@@ -500,7 +501,7 @@ async function confirmOrSkip(
   }
   if (!answer) {
     onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), laterTitle);
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), laterTitle);
     return false;
   }
   return true;
@@ -573,7 +574,7 @@ async function packagedPluginSetup(
     // No writable config for this harness — don't crash on an invariant
     // packagedPlugin() and configWrite() only uphold by convention.
     onEvent('plugin_setup_failed', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), 'Add it by hand');
     return;
   }
   // The user approved the plugin install, not a config-file edit — ask
@@ -653,7 +654,9 @@ export async function offerPluginSetup(
     p.note(
       // The EU instruction builders already open with EU_PLUGIN_IS_NA_ONLY, so
       // don't repeat it as the header; only NA needs the WHY_PLUGIN preamble.
-      region === 'eu' ? lines.join('\n') : [WHY_PLUGIN, '', ...lines].join('\n'),
+      readableNoteBody(
+        region === 'eu' ? lines.join('\n') : [WHY_PLUGIN, '', ...lines].join('\n'),
+      ),
       region === 'eu' ? 'Add the EU Subtext MCP server' : 'Add the Subtext plugin',
     );
     return;

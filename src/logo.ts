@@ -101,6 +101,20 @@ export function brandPink(text: string): string {
 }
 
 /**
+ * Render a note body at full strength. clack dims note bodies; wrapping each
+ * line in a reset (the same escape clack uses for note titles) undoes that so
+ * the text reads at normal weight — the styling the "First run" guide uses.
+ * Any inline color (e.g. brandPink) applied to a line survives, since the
+ * leading reset only clears the ambient dim before the line's own codes run.
+ */
+export function readableNoteBody(body: string): string {
+  return body
+    .split('\n')
+    .map((line) => pc.reset(line))
+    .join('\n');
+}
+
+/**
  * A shade along the logo's pink ramp: t=0 is deep pink, t=0.5 the base,
  * t=1 the glow. Used for the agent-output gutter, whose shade drifts along
  * the ramp as lines stream — a slow shimmer echoing the logo animation.
