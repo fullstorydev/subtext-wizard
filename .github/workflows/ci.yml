@@ -1,0 +1,102 @@
+name: CI
+
+# Runs on every PR, and on pushes to main so the branch protection status and
+# the post-merge state of main are checked by the same job. release.yml stays
+# separate: it owns versioning and publishing, this owns correctness.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to a PR supersedes the run in flight. main is never cancelled —
+# each merge commit gets its own verified result.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      # Don't hide a version-specific failure behind the first job to die.
+      fail-fast: false
+      matrix:
+        # Vitest needs Node 20+. The package itself declares >=18.17, which the
+        # `floor` job below checks against the built artifact.
+        node: ["20", "22", "24"]
+    steps:
+      # Actions are pinned to full commit SHAs (not mutable tags) to defend
+      # against tag-jacking. Trailing comment records the human-readable tag.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        # --ignore-scripts guarantees no dependency lifecycle script runs in
+        # CI, matching release.yml.
+        run: npm ci --ignore-scripts
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # The published tarball is the product. Two things can silently break it and
+  # neither shows up in the test matrix: a test file leaking into dist/ (npm
+  # ships all of dist), and a syntax/API that the declared Node floor can't
+  # load. Check both against the real packed artifact.
+  package:
+    name: package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Build
+        run: npm run build
+
+      - name: Assert no test files reached dist/
+        run: |
+          leaked=$(find dist \( -name '*.test.js' -o -name '*.test.d.ts' \) -o -path 'dist/test/*')
+          if [ -n "$leaked" ]; then
+            echo "Test files leaked into the published tree:"
+            echo "$leaked"
+            exit 1
+          fi
+
+      # Switch the runtime, keeping the tree built above. Vitest can't run on
+      # Node 18, but the shipped CLI has to.
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: "18.17.0"
+
+      - name: Smoke-test the built CLI on the declared Node floor
+        # engines says >=18.17. If bin.js can't start there, the floor is a
+        # lie — either fix the code or raise engines.
+        run: |
+          node --version
+          node dist/bin.js --version
+          node dist/bin.js --help > /dev/null
