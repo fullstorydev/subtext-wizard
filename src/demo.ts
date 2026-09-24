@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
-import clipboard from 'clipboardy';
 import pc from 'picocolors';
-import { brandPink } from './logo.js';
+import { brandPink, readableNoteBody } from './logo.js';
+import { offerCopyAndOpen, type OpenAgentTarget } from './openAgent.js';
 
 /**
  * The wizard's closing section: a short "see it in action" guide. Capture is
@@ -20,6 +20,8 @@ const DEMO_PROMPT_LINES = [
   'local dev build. Use the Subtext tools to find my most recent captured',
   'session and walk me through it: which pages I visited, what I interacted',
   'with, and anything that looked broken or confusing along the way.',
+  'If the Subtext tools return an authentication or authorization error,',
+  'stop and tell me — I likely need to sign in to Subtext in this agent first.',
 ];
 
 export const DEMO_PROMPT = DEMO_PROMPT_LINES.join(' ');
@@ -39,6 +41,9 @@ export interface DemoGuideContext {
   clipboardHoldsInstallPrompt?: boolean;
   /** --yes (CI): show the guide, skip the interactive copy offer. */
   yes: boolean;
+  /** The harness to offer to open at the demo hand-off, when we know it (not
+   * the manual path). Copies the prompt and brings the agent up alongside it. */
+  openTarget?: OpenAgentTarget;
   onEvent: (event: string, properties?: Record<string, unknown>) => void;
 }
 
@@ -46,49 +51,48 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
   const lead = ctx.installPending
     ? `Once the install finishes, make sure everything works.`
     : `Installation complete — let's make sure everything works.`;
-  // clack renders note bodies dimmed; pc.reset per line undoes that (the same
-  // escape clack itself uses for note titles) so everything reads at full
-  // strength. The prompt is set apart by color — brand pink is the agent's
-  // text, plain is the human's steps. Only the closing aside stays dim, and
-  // re-dims inside the reset.
+  // clack renders note bodies dimmed; readableNoteBody resets per line so the
+  // steps read at full strength. The demo prompt itself is NOT in the box — it
+  // prints as a pink block in the timeline next to the copy action below, so
+  // it's clear which text the "copy?" question refers to.
   p.note(
-    [
-      lead,
-      pc.bold('Follow these steps:'),
-      '',
-      '1. Start (or restart) your local dev server so the new snippet is live.',
-      '2. Open the app in your browser and click around for a minute —',
-      '   Subtext is capturing your session as you go.',
-      `3. Open ${ctx.agentName} at this project and paste in the demo prompt`,
-      '   below — that part is the agent\'s job:',
-      '',
-      ...DEMO_PROMPT_LINES.map((line) => `   ${brandPink(line)}`),
-      '',
-      pc.dim('Captured sessions can take a minute or two to show up.'),
-    ]
-      .map((line) => pc.reset(line))
-      .join('\n'),
+    readableNoteBody(
+      [
+        lead,
+        pc.bold('Follow these steps:'),
+        '',
+        '1. Start (or restart) your local dev server so the new snippet is live.',
+        '2. Open the app in your browser and click around for a minute —',
+        '   Subtext is capturing your session as you go.',
+        `3. Open ${ctx.agentName} at this project and paste in the demo prompt`,
+        '   shown below — that part is the agent\'s job.',
+        '   The first time it reaches for a Subtext tool, your agent will ask you',
+        '   to sign in to Subtext — approve it so the tools can read your sessions.',
+        '',
+        pc.dim('Captured sessions can take a minute or two to show up.'),
+      ].join('\n'),
+    ),
     'First run',
   );
   ctx.onEvent('demo_guide_shown', { install_pending: ctx.installPending });
 
+  // The agent-facing prompt, in brand pink, as its own timeline block right
+  // above the copy question — clack anchors the active prompt at the bottom,
+  // so the prompt has to sit just before it (nothing can render below a live
+  // question). This keeps it out of the box and directly beside the action.
+  p.log.message(DEMO_PROMPT_LINES.map((line) => brandPink(line)).join('\n'));
+
   if (ctx.yes) return;
 
-  const answer = await p.confirm({
-    message: ctx.clipboardHoldsInstallPrompt
-      ? `Copy the demo prompt to your clipboard? ${pc.dim(
-          '(replaces the install prompt currently on it)',
-        )}`
-      : 'Copy the demo prompt to your clipboard?',
+  await offerCopyAndOpen({
+    prompt: DEMO_PROMPT,
+    agentName: ctx.agentName,
+    target: ctx.openTarget,
+    clipboardBusy: ctx.clipboardHoldsInstallPrompt,
+    label: 'demo prompt',
+    readyHint: "after you've clicked around",
+    onEvent: ctx.onEvent,
+    copiedEvent: 'demo_prompt_copied',
+    openedEvent: 'demo_agent_opened',
   });
-  if (p.isCancel(answer) || !answer) return;
-
-  try {
-    await clipboard.write(DEMO_PROMPT);
-  } catch {
-    p.log.warn('Could not write to the clipboard — copy the prompt from the note above.');
-    return;
-  }
-  ctx.onEvent('demo_prompt_copied');
-  p.log.success(`Demo prompt copied — paste it into ${ctx.agentName} after you've clicked around.`);
 }

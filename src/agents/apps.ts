@@ -33,6 +33,10 @@ function makeAppAgent(spec: AppAgentSpec): AgentDefinition {
       return {
         definition,
         binaryPath: binaryPath ?? undefined,
+        // Only claim the bundle name when the bundle is actually present, so
+        // reopening via `open -a` can't miss.
+        macAppName: appPath ? spec.macAppName : undefined,
+        opensFolder: spec.opensFolder,
         detail: binaryPath ?? appPath ?? undefined,
       };
     },
