@@ -21,7 +21,7 @@ export const TELEMETRY_MARKER_PREFIX = '__SUBTEXT_TELEMETRY__';
  * producer can ever emit one. */
 export type AgentWorkflowStep = Exclude<WorkflowStep, 'start' | 'complete'>;
 
-const AGENT_STEPS: ReadonlySet<string> = new Set<AgentWorkflowStep>([
+export const AGENT_STEPS: ReadonlySet<string> = new Set<AgentWorkflowStep>([
   'precheck',
   'explore',
   'plan',
@@ -43,7 +43,7 @@ const OUTCOMES: ReadonlySet<string> = new Set<WorkflowOutcome>([
  * `model` are deliberately absent: the wizard stamps harness itself, so a
  * forged marker can never override attribution. Unknown keys and wrong-typed
  * values are dropped, strings and arrays are capped. */
-const METADATA_FIELDS: Record<string, 'boolean' | 'number' | 'string' | 'string[]'> = {
+export const METADATA_FIELDS: Record<string, 'boolean' | 'number' | 'string' | 'string[]'> = {
   duration_ms: 'number',
   tokens: 'number',
   already_installed: 'boolean',
