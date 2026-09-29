@@ -185,6 +185,14 @@ export function subtextOauthResource(region: Region): string {
 export const SNIPPET_PATH = '/code/v2/snippet';
 
 /**
+ * "Who am I" endpoint. Authenticates an API key (`Authorization: Basic <key>`)
+ * and returns `{ orgId, email, role }`. A normal API key is opaque — unlike an
+ * OAuth access token it carries no decodable org id — so this is how we resolve
+ * its org.
+ */
+export const ME_PATH = '/me';
+
+/**
  * Telemetry ingestion endpoint. Accepts a protojson `WorkflowEvent` and
  * requires an authenticated session — we send the user's OAuth access token
  * as `Authorization: Bearer`.
@@ -218,8 +226,15 @@ export interface WizardOptions {
   telemetry: boolean;
   /** Data region for auth + API hosts. */
   region: Region;
-  /** Pre-supplied access token; skips the browser login. */
+  /** Pre-supplied credential (API key or OAuth token); skips the browser login. */
   apiKey?: string;
+  /**
+   * How to authenticate `apiKey`. `auto` (from --api-key) detects an OAuth
+   * access token vs a normal API key from the value; `oauth` (from
+   * --api-key-oauth) forces the OAuth-token path, matching the wizard's
+   * original --api-key behavior.
+   */
+  apiKeyKind?: 'auto' | 'oauth';
   /** Pre-select an agent by id; skips the agent picker. */
   agent?: string;
   /** Pre-select integrations (comma-separated ids); skips the multiselect. */

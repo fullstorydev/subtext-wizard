@@ -7,6 +7,7 @@ import { runTerminalAgent } from './agents/helpers.js';
 import { MANUAL_CHOICE } from './agents/index.js';
 import type { DetectedAgent } from './agents/types.js';
 import type { Region, WizardOptions } from './config.js';
+import { readableNoteBody } from './logo.js';
 import { subtextMcpUrl } from './plugin.js';
 
 /**
@@ -16,13 +17,19 @@ import { subtextMcpUrl } from './plugin.js';
  * GUI apps never reach here — they get plugin.ts's guidePluginSetup before
  * the handoff, whose outcome also decides telemetry ownership.
  *
- * The packaged plugin is preferred where one exists, because it bundles
- * more than the MCP server (skills for Claude Code, both realm servers for
- * Gemini): Claude Code and Gemini CLI install it via their own CLIs.
- * Harnesses without a plugin get the raw MCP server entry written straight
- * into their own config file (Codex TOML) — tools only, no agent commands
- * involved. Declines and unparseable configs get instructions instead.
+ * The packaged plugin is preferred for NA orgs where one exists, because it
+ * bundles more than the MCP server (skills for Claude Code, the MCP server
+ * for Gemini): Claude Code and Gemini CLI install it via their own CLIs.
+ * The plugin ships the NA endpoint only. EU orgs skip it and get a raw MCP
+ * server entry at the EU URL, so the agent talks to the same realm as the
+ * capture snippet. Harnesses without a plugin get the raw entry written
+ * straight into their own config file (Codex TOML) — tools only, no agent
+ * commands involved. Declines and unparseable configs get instructions
+ * instead.
  */
+
+const EU_PLUGIN_IS_NA_ONLY =
+  'This org is in the EU data region. The Subtext plugin only includes the NA MCP server.';
 
 /** The plugin repo: Claude Code marketplace and Gemini extension
  * (gemini-extension.json) in one. */
@@ -224,6 +231,31 @@ function configWrite(agentId: string, dir: string, region: Region): ConfigWrite 
 /** Harness-specific instructions for adding the plugin/server by hand. */
 function pluginInstructions(agentId: string, region: Region): string[] {
   const url = subtextMcpUrl(region);
+  if (region === 'eu') {
+    switch (agentId) {
+      case 'claude-code':
+        return [
+          `${EU_PLUGIN_IS_NA_ONLY} Add the EU server to .mcp.json in the project:`,
+          ...indent(manualMcpConfig(region)),
+        ];
+      case 'gemini':
+        return [
+          `${EU_PLUGIN_IS_NA_ONLY} Add the EU server to ~/.gemini/settings.json:`,
+          ...indent(JSON.stringify({ mcpServers: { subtext: { url, type: 'http' } } }, null, 2)),
+        ];
+      case 'codex':
+        return [
+          `${EU_PLUGIN_IS_NA_ONLY} Add the EU server to ~/.codex/config.toml:`,
+          '  [mcp_servers.subtext]',
+          `  url = "${url}"`,
+        ];
+      default:
+        return [
+          `${EU_PLUGIN_IS_NA_ONLY} Add an MCP server named 'subtext' in your agent's MCP settings:`,
+          ...indent(manualMcpConfig(region)),
+        ];
+    }
+  }
   switch (agentId) {
     case 'claude-code':
       return [
@@ -236,7 +268,7 @@ function pluginInstructions(agentId: string, region: Region): string[] {
       ];
     case 'gemini':
       return [
-        'Install the Subtext extension (bundles the MCP servers):',
+        'Install the Subtext extension (bundles the MCP server):',
         `  gemini extensions install ${PLUGIN_REPO_URL}`,
         '',
         'Prefer a raw MCP server? Add this to ~/.gemini/settings.json:',
@@ -258,6 +290,12 @@ function pluginInstructions(agentId: string, region: Region): string[] {
 
 /** Shown when the user took the raw prompt — we don't know their harness. */
 function manualChoiceInstructions(region: Region): string[] {
+  if (region === 'eu') {
+    return [
+      `${EU_PLUGIN_IS_NA_ONLY} Add the EU server by hand (tools only):`,
+      ...indent(manualMcpConfig(region)),
+    ];
+  }
   return [
     'Claude Code — run in a session (installs tools + skills):',
     `  /plugin marketplace add ${PLUGIN_REPO_URL}`,
@@ -354,7 +392,7 @@ function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): Packaged
       };
     case 'gemini':
       return {
-        confirmHint: 'installs the Subtext extension with its MCP servers',
+        confirmHint: 'installs the Subtext extension with its MCP server',
         commands: [`gemini extensions install ${PLUGIN_REPO_URL}`],
         alreadyInstalled: async () => {
           try {
@@ -400,7 +438,7 @@ async function applyConfigWrite(
   if (outcome === 'unparseable') {
     onEvent('plugin_setup_failed', { agent: agentId });
     p.log.warn(`Could not update ${shownPath} — it may have a format we can't merge safely.`);
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), 'Add it by hand');
     return;
   }
   onEvent('plugin_setup_completed', { agent: agentId, method });
@@ -421,6 +459,9 @@ async function removeSupersededRawEntry(
   dir: string,
   region: Region,
 ): Promise<void> {
+  // The packaged plugin is NA-only. Never drop an EU raw entry — that URL is
+  // the MCP source for an EU org, and the plugin cannot replace it.
+  if (region === 'eu') return;
   const target = configWrite(agentId, dir, region);
   if (!target?.removeOurs) return;
   try {
@@ -460,7 +501,7 @@ async function confirmOrSkip(
   }
   if (!answer) {
     onEvent('plugin_setup_declined', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), laterTitle);
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), laterTitle);
     return false;
   }
   return true;
@@ -473,6 +514,9 @@ async function packagedPluginSetup(
   region: Region,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
+  /** True when consent was already captured earlier (or --yes): proceed
+   * through the confirm gates without asking again. */
+  autoYes: boolean,
 ): Promise<void> {
   const agentId = chosen.definition.id;
   const agentName = chosen.definition.name;
@@ -487,11 +531,10 @@ async function packagedPluginSetup(
     return;
   }
 
-  // Only an explicit --yes (CI) skips this — matching the wizard's other
-  // confirm gates. --agent merely preselects the harness; it never
-  // authorizes changes to the user's config.
+  // --yes (CI) or consent already captured pre-handoff skips this. --agent
+  // merely preselects the harness; it never authorizes changes to the config.
   if (
-    !options.yes &&
+    !autoYes &&
     !(await confirmOrSkip(
       `Install the Subtext plugin in ${agentName}? ${pc.dim(`(${plugin.confirmHint})`)}`,
       agentId,
@@ -533,13 +576,13 @@ async function packagedPluginSetup(
     // No writable config for this harness — don't crash on an invariant
     // packagedPlugin() and configWrite() only uphold by convention.
     onEvent('plugin_setup_failed', { agent: agentId });
-    p.note(pluginInstructions(agentId, region).join('\n'), 'Add it by hand');
+    p.note(readableNoteBody(pluginInstructions(agentId, region).join('\n')), 'Add it by hand');
     return;
   }
   // The user approved the plugin install, not a config-file edit — ask
-  // again before touching a different file (same --yes bypass as above).
+  // again before touching a different file (same auto-yes bypass as above).
   if (
-    !options.yes &&
+    !autoYes &&
     !(await confirmOrSkip(
       `Add the Subtext MCP server to ${prettyPath(target.file)} instead?`,
       agentId,
@@ -555,9 +598,11 @@ async function packagedPluginSetup(
 
 /**
  * Step 8 of the wizard, after the prompt run: wire Subtext into the harness
- * that ran the install — packaged plugin where one exists, raw MCP server
- * entry otherwise. `region` is the org's resolved realm (from the auth
- * token), not the CLI flag — the MCP URLs written here must match the org.
+ * that ran the install — packaged plugin where one exists (NA orgs), raw
+ * MCP server entry otherwise. `region` is the org's resolved realm (from
+ * the auth token), not the CLI flag — the MCP URLs written here must
+ * match the org. EU orgs never take the packaged-plugin path: that plugin
+ * only ships the NA endpoint, so we write the EU URL as a raw server.
  * Never throws — the install already succeeded, so plugin trouble is
  * reported and the wizard finishes cleanly.
  */
@@ -566,15 +611,55 @@ export async function offerPluginSetup(
   region: Region,
   options: WizardOptions,
   onEvent: (event: string, properties?: Record<string, unknown>) => void,
+  /** Consent captured earlier in the flow, so this step doesn't prompt again:
+   * `true` proceeds silently, `false` skips with "add it later" instructions,
+   * `undefined` asks as usual. --yes always proceeds regardless. */
+  preConsent?: boolean,
 ): Promise<void> {
   const agentId = chosen === MANUAL_CHOICE ? MANUAL_CHOICE : chosen.definition.id;
   onEvent('plugin_setup_offered', { agent: agentId });
 
+  // Consent was already declined earlier — don't set anything up, just leave
+  // instructions for doing it later. (Never reached for MANUAL_CHOICE, which
+  // isn't passed a preConsent, but handled for completeness.)
+  if (preConsent === false) {
+    onEvent('plugin_setup_declined', { agent: agentId });
+    const lines =
+      chosen === MANUAL_CHOICE
+        ? manualChoiceInstructions(region)
+        : pluginInstructions(agentId, region);
+    p.note(readableNoteBody([WHY_PLUGIN, '', ...lines].join('\n')), 'Add review tools later');
+    return;
+  }
+  const autoYes = options.yes || preConsent === true;
+
   if (chosen !== MANUAL_CHOICE) {
     const plugin = packagedPlugin(chosen, options);
-    if (plugin) {
-      await packagedPluginSetup(plugin, chosen, region, options, onEvent);
+    if (plugin && region !== 'eu') {
+      await packagedPluginSetup(plugin, chosen, region, options, onEvent, autoYes);
       return;
+    }
+    if (plugin && region === 'eu') {
+      // The packaged plugin ships the NA server only. If an earlier run (or a
+      // manual install) left it in place, it keeps loading the NA endpoint next
+      // to the EU one we're about to write: duplicate tools pointed at the
+      // wrong realm. We can't uninstall it for the user, so flag it rather than
+      // add the EU server silently beside it.
+      if (!options.mock && (await plugin.alreadyInstalled())) {
+        p.log.warn(
+          `The Subtext plugin is installed in ${chosen.definition.name}, but it only includes the NA MCP server. ` +
+            'Remove it so this EU org talks only to the EU server.',
+        );
+      }
+      // The NA Claude Code plugin bundles the review skills; EU orgs skip it and
+      // get a tools-only MCP entry below, so point them at openskills for the
+      // skills. (The Gemini extension is MCP-only, so it has nothing to add.)
+      if (chosen.definition.id === 'claude-code') {
+        p.log.info(
+          'The Subtext plugin also installs review skills. Add them for this EU org with:  npx openskills install fullstorydev/subtext',
+        );
+      }
+      p.log.info(pc.dim(`${EU_PLUGIN_IS_NA_ONLY} Adding the EU server directly.`));
     }
   }
 
@@ -586,7 +671,14 @@ export async function offerPluginSetup(
         ? manualChoiceInstructions(region)
         : pluginInstructions(agentId, region);
     onEvent('plugin_setup_completed', { agent: agentId, method: 'instructions' });
-    p.note([WHY_PLUGIN, '', ...lines].join('\n'), 'Add the Subtext plugin');
+    p.note(
+      // The EU instruction builders already open with EU_PLUGIN_IS_NA_ONLY, so
+      // don't repeat it as the header; only NA needs the WHY_PLUGIN preamble.
+      readableNoteBody(
+        region === 'eu' ? lines.join('\n') : [WHY_PLUGIN, '', ...lines].join('\n'),
+      ),
+      region === 'eu' ? 'Add the EU Subtext MCP server' : 'Add the Subtext plugin',
+    );
     return;
   }
 
@@ -594,9 +686,9 @@ export async function offerPluginSetup(
   const shownPath = prettyPath(target.file);
 
   if (
-    !options.yes &&
+    !autoYes &&
     !(await confirmOrSkip(
-      `Add the Subtext MCP server to ${shownPath}? ${pc.dim(
+      `Add the ${region === 'eu' ? 'EU ' : ''}Subtext MCP server to ${shownPath}? ${pc.dim(
         `(lets ${agentName} review captured sessions)`,
       )}`,
       agentId,

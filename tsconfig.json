@@ -14,5 +14,8 @@
     "sourceMap": false,
     "resolveJsonModule": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Tests are colocated with the code but must never reach dist/ — the npm
+  // `files` allowlist ships all of dist.
+  "exclude": ["src/**/*.test.ts", "src/test"]
 }

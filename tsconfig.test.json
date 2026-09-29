@@ -1,0 +1,15 @@
+{
+  // Superset of the build config: same options, but the tests are back in and
+  // nothing is emitted. `npm run typecheck` uses this so test files and the
+  // vitest config are type-checked too; `npm run build` uses tsconfig.json,
+  // which excludes them and keeps dist/ (the published tree) test-free.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Widened from src/ so vitest.config.ts at the repo root is in scope.
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src", "vitest.config.ts"],
+  "exclude": []
+}
