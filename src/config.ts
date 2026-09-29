@@ -241,6 +241,12 @@ export interface WizardOptions {
   integrations?: string[];
   /** Build and print the prompt instead of launching an agent. */
   printPrompt: boolean;
+  /** Skip launching the coding agent (logs "prompt ran!" instead of the
+   * prompt), while leaving every other real side effect alone — notably the
+   * sightmap CLI install. Unlike --mock, auth/snippet/telemetry stay real;
+   * unlike --print-prompt, the prompt itself is never printed. For quickly
+   * exercising the wizard's own flow without a full autonomous agent run. */
+  stubAgent: boolean;
   /** Skip the pre-launch confirmation (non-interactive/CI use). */
   yes: boolean;
   /** Opt into building a sightmap corpus under --yes. Interactive runs are

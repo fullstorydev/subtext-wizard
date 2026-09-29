@@ -194,7 +194,11 @@ export async function offerSightmapSetup(
     return;
   }
 
-  if (options.mock) {
+  // --stub-agent wants the opposite trade-off from --mock here: it still
+  // provisions the CLI for real (that's the part worth testing), it just
+  // skips the agent run below. So mock's early return is skipped whenever
+  // --stub-agent is set, even if --mock is also passed.
+  if (options.mock && !options.stubAgent) {
     p.log.info(
       pc.dim(
         `Mock mode: would run\n  ${provisionCommands().join('\n  ')}\n` +
@@ -210,6 +214,12 @@ export async function offerSightmapSetup(
   onEvent('sightmap_provisioned', { ok: provisioned });
   if (!provisioned) {
     showInstructions(onEvent);
+    return;
+  }
+
+  if (options.stubAgent) {
+    p.log.info(pc.dim('SIGHTMAP: prompt ran!'));
+    onEvent('sightmap_authored', { method: 'stub-agent', live: Boolean(appUrl) });
     return;
   }
 

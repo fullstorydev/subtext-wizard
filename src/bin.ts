@@ -35,6 +35,13 @@ Options:
                           userpilot, sprig, segment — unknown names become "Other")
   --print-prompt          Print each install prompt to stdout as it's built, then
                           continue the normal flow (testing aid)
+  --stub-agent            Skip launching the coding agent for each install/
+                          enrich/sightmap prompt (logs "prompt ran!" instead of
+                          printing it), but leave every other real side effect
+                          alone — notably the sightmap CLI install. Unlike
+                          --mock, auth/snippet/telemetry stay real; unlike
+                          --print-prompt, the prompt itself is never printed.
+                          (testing aid)
   --sightmap              Also build a .sightmap/ component corpus so session
                           reviews name your UI. Offered interactively by default;
                           this flag opts in for unattended --yes runs.
@@ -68,6 +75,7 @@ function main(): void {
         agent: { type: 'string' },
         integrations: { type: 'string' },
         'print-prompt': { type: 'boolean', default: false },
+        'stub-agent': { type: 'boolean', default: false },
         sightmap: { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
         mock: { type: 'boolean', default: false },
@@ -123,6 +131,7 @@ function main(): void {
       .map((s) => s.trim())
       .filter(Boolean),
     printPrompt: values['print-prompt'] ?? false,
+    stubAgent: values['stub-agent'] ?? false,
     sightmap: values.sightmap ?? false,
     yes: values.yes ?? false,
     mock,
