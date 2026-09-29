@@ -262,7 +262,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
             detail,
           ].join('\n'),
         ),
-        'Step 2 of 2 · Enrich your Subtext setup (optional)',
+        `${pc.bold('Step 2 of 2')} · Enrich your Subtext setup (optional)`,
       );
       return true;
     };
