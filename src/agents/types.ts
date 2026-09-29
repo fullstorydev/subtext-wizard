@@ -31,10 +31,36 @@ export interface LaunchContext {
   onTelemetry?: (marker: StepMarker) => void;
 }
 
+/**
+ * What the harness itself reported about a run, when it reports anything.
+ * Claude Code's `stream-json` result event carries real token counts, cost,
+ * turn count, and a subtype that says whether the model finished or hit the
+ * turn limit; Codex and Gemini expose no structured stream, so their runs
+ * simply carry no stats. `source` keeps the two apart: a measured count and a
+ * model's self-estimate are not comparable, so never mix them in one metric.
+ */
+export interface HarnessRunStats {
+  source: 'harness';
+  /** Every token bucket the run consumed (input, output, and both cache
+   * buckets), i.e. what the harness actually billed. */
+  tokens?: number;
+  costUsd?: number;
+  numTurns?: number;
+  durationMs?: number;
+  /** Claude Code result subtype: 'success', 'error_max_turns',
+   * 'error_during_execution'. */
+  subtype?: string;
+  /** The harness's own verdict that the run did not finish cleanly. This is the
+   * signal exit code can't give us: a refused or abandoned run still exits 0. */
+  isError?: boolean;
+}
+
 export interface LaunchResult {
   /** 'ran' — agent executed to completion here; 'handoff' — user finishes in their app. */
   mode: 'ran' | 'handoff';
   exitCode?: number;
+  /** Set only by harnesses that report their own usage (Claude Code today). */
+  stats?: HarnessRunStats;
   /** Instructions to show the user after a handoff. */
   followUp?: string[];
   /** Handoff only: the install prompt was copied to the clipboard, so later

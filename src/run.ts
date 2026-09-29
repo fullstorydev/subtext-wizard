@@ -3,7 +3,7 @@ import clipboard from 'clipboardy';
 import pc from 'picocolors';
 import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
-import type { LaunchResult } from './agents/types.js';
+import type { HarnessRunStats, LaunchResult } from './agents/types.js';
 import type { WizardOptions } from './config.js';
 import { WIZARD_VERSION, telemetryUrl } from './config.js';
 import { showDemoGuide } from './demo.js';
@@ -25,7 +25,7 @@ import {
 } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
 import { fetchCaptureSnippet } from './snippet.js';
-import { Telemetry } from './telemetry.js';
+import { Telemetry, type WorkflowEventMetadata } from './telemetry.js';
 
 export async function runWizard(options: WizardOptions): Promise<number> {
   const telemetry = new Telemetry(options.telemetry, options.debug);
@@ -396,6 +396,38 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // confirm. --yes (CI) skipped the gate and proceeds straight here.
     sendStart(chosen.definition.id);
 
+    // Real usage for the funnel. Claude Code reports its own token counts,
+    // cost, and turn count in the stream-json result event, so we read the
+    // truth instead of asking the model to guess at it; codex and gemini
+    // expose no structured stream, so a run on them carries no counts rather
+    // than a number that can't be compared with a measured one. token_source
+    // on the event is what keeps the two apart downstream.
+    let harnessTokens = 0;
+    let harnessCostUsd = 0;
+    let agentTokens = 0;
+    const recordRunStats = (stats?: HarnessRunStats) => {
+      if (!stats) return;
+      if (stats.tokens !== undefined) harnessTokens += stats.tokens;
+      if (stats.costUsd !== undefined) harnessCostUsd += stats.costUsd;
+      telemetry.note('harness_run_stats', {
+        harness: selectedHarness,
+        subtype: stats.subtype ?? null,
+        is_error: stats.isError ?? null,
+        tokens: stats.tokens ?? null,
+        cost_usd: stats.costUsd ?? null,
+        num_turns: stats.numTurns ?? null,
+        duration_ms: stats.durationMs ?? null,
+      });
+    };
+    /** Usage metadata for the `complete` event: measured counts win, the
+     * agent's own per-step numbers are a labelled fallback, and a harness that
+     * gives us neither says so rather than reporting a silent zero. */
+    const usageMetadata = (): WorkflowEventMetadata => {
+      if (harnessTokens > 0) return { total_tokens: harnessTokens, token_source: 'harness' };
+      if (agentTokens > 0) return { total_tokens: agentTokens, token_source: 'agent' };
+      return { token_source: 'none' };
+    };
+
     // Drive one launch, parsing the agent's per-step stdout markers. Marker
     // lines come from an untrusted stream (the agent echoes output of arbitrary
     // repo code), so cap what it can make the wizard send: one event per step,
@@ -428,7 +460,14 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           if (sentMarkerSteps.has(step)) return;
           sentMarkerSteps.add(step);
           if (step === 'install' && outcome === 'success') installSucceeded = true;
-          telemetry.step(step, outcome, { ...metadata, harness: chosen.definition.id });
+          // A token count in a marker is the model's own estimate, so it is
+          // labelled as such and only ever used when the harness reports none.
+          if (typeof metadata?.tokens === 'number') agentTokens += metadata.tokens;
+          telemetry.step(step, outcome, {
+            ...metadata,
+            harness: chosen.definition.id,
+            ...(typeof metadata?.tokens === 'number' ? { token_source: 'agent' as const } : {}),
+          });
         },
       });
       return { result, installSucceeded };
@@ -436,23 +475,30 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     // Phase 1 — install the snippet.
     const { result, installSucceeded } = await driveLaunch(snippetPrompt);
+    recordRunStats(result.stats);
     telemetry.note('wizard_completed', {
       agent: chosen.definition.id,
       mode: result.mode,
       exit_code: result.exitCode ?? null,
+      result_subtype: result.stats?.subtype ?? null,
     });
 
-    // Exit code 0 only proves the CLI ran to completion — codex/gemini exit 0
-    // even when the model refused or abandoned the install — so `success`
-    // additionally requires the agent's own install-step marker; exit 0 without
-    // it is recorded as `partial`. (When the prompt carried no marker
-    // instructions, exit code is all we have.)
-    const installConfirmed = installSucceeded || promptTelemetry !== 'stdout';
+    // Exit code 0 only proves the CLI ran to completion: agents exit 0 even
+    // when the model refused or abandoned the install. Claude Code says which
+    // of those happened outright (the result event's subtype separates a
+    // finished run from error_max_turns / error_during_execution), so that
+    // verdict is decisive when we have it. Otherwise `success` requires the
+    // agent's own install-step marker, and exit 0 without one is `partial`.
+    // (When the prompt carried no marker instructions, exit code is all we
+    // have.)
+    const harnessReportedError = result.stats?.isError === true;
+    const installConfirmed =
+      !harnessReportedError && (installSucceeded || promptTelemetry !== 'stdout');
 
     if (result.exitCode !== 0) {
       // Phase 1 failed — the snippet isn't in, so there's nothing to review and
       // no point offering the enrichment run. Close the funnel as failed.
-      telemetry.step('complete', 'fail', { harness: chosen.definition.id });
+      telemetry.step('complete', 'fail', { harness: chosen.definition.id, ...usageMetadata() });
       p.outro(
         pc.yellow(
           `The agent exited with code ${result.exitCode}. Review its output above; you can re-run this installer to try again.`,
@@ -473,8 +519,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     }
     await showDemoGuide({
       agentName: chosen.definition.name,
-      // Exit 0 without the agent's install marker means the install may have
-      // been refused or abandoned — frame the guide as post-install work.
+      // Not confirmed means the harness flagged the run as errored, or exit 0
+      // arrived without the agent's install marker: either way the install may
+      // have been refused or abandoned, so frame the guide as post-install work.
       installPending: !installConfirmed,
       yes: options.yes,
       // Suppressed under --print-prompt so the demo's "Open agent?" offer can't
@@ -512,7 +559,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         });
         printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
         const { result: enrichResult } = await driveLaunch(enrichPrompt);
-        telemetry.note('phase2_completed', { exit_code: enrichResult.exitCode ?? null });
+        recordRunStats(enrichResult.stats);
+        telemetry.note('phase2_completed', {
+          exit_code: enrichResult.exitCode ?? null,
+          result_subtype: enrichResult.stats?.subtype ?? null,
+        });
         if (enrichResult.exitCode !== 0) {
           telemetry.note('phase2_failed', { exit_code: enrichResult.exitCode ?? null });
         }
@@ -531,7 +582,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // The single `complete` for the whole (two-phase) terminal run.
     telemetry.step('complete', installConfirmed ? 'success' : 'partial', {
       harness: chosen.definition.id,
+      ...usageMetadata(),
     });
+    if (harnessCostUsd > 0) {
+      telemetry.note('run_cost', { harness: chosen.definition.id, cost_usd: harnessCostUsd });
+    }
     p.outro(
       'Subtext install finished. Review the changes (and any subtext-*-report.md files), then deploy to capture real user sessions.',
     );

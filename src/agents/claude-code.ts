@@ -5,7 +5,7 @@ import pc from 'picocolors';
 import { firstExistingPath, runTerminalAgent, sanitizeTerminalOutput, which } from './helpers.js';
 import { printAgentAction, printAgentText } from './output.js';
 import { extractTelemetryMarkers } from './telemetry-marker.js';
-import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
+import type { AgentDefinition, HarnessRunStats, LaunchContext, LaunchResult } from './types.js';
 
 /**
  * Tools the headless run is pre-authorized to use beyond edits: docs fetching
@@ -40,8 +40,75 @@ async function findClaudeBinary(): Promise<string | null> {
 interface StreamEvent {
   type?: string;
   subtype?: string;
+  is_error?: boolean;
   result?: string;
+  duration_ms?: number;
+  num_turns?: number;
+  total_cost_usd?: number;
+  session_id?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
   message?: { content?: Array<{ type?: string; text?: string; name?: string; input?: Record<string, unknown> }> };
+}
+
+function finiteNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** Sum every bucket the result event reports, cache included, so the number
+ * matches what the run actually cost rather than just the visible context. */
+function totalTokens(usage: StreamEvent['usage']): number | undefined {
+  if (!usage) return undefined;
+  const sum =
+    (finiteNumber(usage.input_tokens) ?? 0) +
+    (finiteNumber(usage.output_tokens) ?? 0) +
+    (finiteNumber(usage.cache_creation_input_tokens) ?? 0) +
+    (finiteNumber(usage.cache_read_input_tokens) ?? 0);
+  return sum > 0 ? sum : undefined;
+}
+
+/**
+ * The final `result` event is the harness's own accounting of the run: real
+ * token counts, real cost, and a subtype that separates a finished run from
+ * one that hit the turn limit or died mid-execution. That last bit is the
+ * thing an exit code can't tell us, since a refused or abandoned run still
+ * exits 0.
+ */
+function readResultStats(event: StreamEvent): HarnessRunStats {
+  return {
+    source: 'harness',
+    tokens: totalTokens(event.usage),
+    costUsd: finiteNumber(event.total_cost_usd),
+    numTurns: finiteNumber(event.num_turns),
+    durationMs: finiteNumber(event.duration_ms),
+    subtype: typeof event.subtype === 'string' ? event.subtype : undefined,
+    // Older builds set only the subtype, so treat any non-success subtype as
+    // an error even when is_error is absent.
+    isError: event.is_error === true || (!!event.subtype && event.subtype !== 'success'),
+  };
+}
+
+function formatCount(n: number): string {
+  return n >= 1_000_000
+    ? `${(n / 1_000_000).toFixed(1)}M`
+    : n >= 1_000
+      ? `${(n / 1_000).toFixed(1)}k`
+      : String(n);
+}
+
+/** One dim line of run economics, so the user sees what the run actually
+ * spent instead of nothing at all. */
+function summarizeStats(stats: HarnessRunStats): string | undefined {
+  const parts: string[] = [];
+  if (stats.tokens !== undefined) parts.push(`${formatCount(stats.tokens)} tokens`);
+  if (stats.costUsd !== undefined) parts.push(`$${stats.costUsd.toFixed(2)}`);
+  if (stats.numTurns !== undefined) parts.push(`${stats.numTurns} turns`);
+  if (stats.durationMs !== undefined) parts.push(`${Math.round(stats.durationMs / 1000)}s`);
+  return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
 function describeToolUse(name: string | undefined, input: Record<string, unknown> = {}): string {
@@ -61,6 +128,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
 
   let resultText: string | undefined;
   let lastAssistantText: string | undefined;
+  let stats: HarnessRunStats | undefined;
   const exitCode = await runTerminalAgent({
     binaryPath: ctx.binaryPath!,
     args: [
@@ -104,6 +172,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
         }
       } else if (event.type === 'result') {
         resultText = event.result;
+        stats = readResultStats(event);
       }
     },
   });
@@ -120,7 +189,23 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
     ).trim();
     if (cleaned && cleaned !== lastAssistantText) p.note(cleaned, 'Claude Code result');
   }
-  return { mode: 'ran', exitCode };
+
+  if (stats) {
+    const summary = summarizeStats(stats);
+    if (summary) p.log.info(pc.dim(summary));
+    if (stats.isError) {
+      p.log.warn(
+        `Claude Code ended with \`${stats.subtype ?? 'an error'}\` rather than finishing the install. Review its output above.`,
+      );
+    }
+    ctx.onEvent?.('agent_run_stats', {
+      subtype: stats.subtype ?? null,
+      tokens: stats.tokens ?? null,
+      cost_usd: stats.costUsd ?? null,
+      num_turns: stats.numTurns ?? null,
+    });
+  }
+  return { mode: 'ran', exitCode, stats };
 }
 
 export const claudeCode: AgentDefinition = {
