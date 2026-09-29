@@ -10,7 +10,7 @@ If a `sightmap-authoring` skill is available in this environment, use it — it 
 
 ## Step 1: Check the tooling
 
-Run `sightmap --version` to confirm the CLI is available. If the command is missing, install it with `npm install -g @sightmap/sightmap` and try again. If it still can't be installed, stop and report that the CLI is unavailable — the rest of this task depends on it.
+Run `sightmap version` to confirm the CLI is available. If the command is missing, install it with `npm install -g @sightmap/sightmap` and try again. If it still can't be installed, stop and report that the CLI is unavailable — the rest of this task depends on it.
 
 ## Step 2: Seed the corpus from the codebase
 
