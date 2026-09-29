@@ -181,6 +181,18 @@ export async function offerSightmapSetup(
   // Gather the live-pass URL before building the prompt so the corpus is
   // authored in a single agent run rather than two.
   const appUrl = await askAppUrl(options);
+  const prompt = buildSightmapPrompt({ mode: 'headless', appUrl });
+
+  // --print-prompt is a dry run for every step, this one included: show the
+  // prompt the same way STEP 1/2 do, and skip the real install + agent run.
+  // Checked ahead of --mock so the combination still prints the prompt rather
+  // than falling through to mock's summary-only message.
+  if (options.printPrompt) {
+    console.log(`\n===== SIGHTMAP: authoring prompt =====\n\n${prompt}\n`);
+    p.log.info(pc.dim('--print-prompt: skipping the sightmap CLI install and agent run.'));
+    onEvent('sightmap_authored', { method: 'print-prompt', live: Boolean(appUrl) });
+    return;
+  }
 
   if (options.mock) {
     p.log.info(
@@ -201,7 +213,6 @@ export async function offerSightmapSetup(
     return;
   }
 
-  const prompt = buildSightmapPrompt({ mode: 'headless', appUrl });
   p.log.step(`Authoring the sightmap with ${chosen.definition.name}…`);
   let result;
   try {
