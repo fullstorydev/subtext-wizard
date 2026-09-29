@@ -254,11 +254,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       p.note(
         readableNoteBody(
           [
-            'To get the most out of your captured sessions, three more steps:',
+            'To get the most out of your captured sessions, four more steps:',
             '',
             '  1. Identify users — tie each session to the signed-in person.',
             '  2. Link analytics — add the session URL to the tools you already use.',
             '  3. Mask sensitive data — tag PII so it stays out of capture.',
+            '  4. Build a sightmap: map your UI so reviews name components instead of selectors.',
             '',
             detail,
           ].join('\n'),
@@ -291,7 +292,6 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       }
       // Plugin setup — we don't know the harness, so show every path.
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, onEvent);
-      await offerSightmapSetup(MANUAL_CHOICE, options, onEvent);
       await showDemoGuide({
         agentName: 'your coding agent',
         installPending: true,
@@ -317,6 +317,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           yes: options.yes,
           onEvent,
         });
+        // Last item of the enrichment list — offered after the other three.
+        await offerSightmapSetup(MANUAL_CHOICE, options, onEvent);
       }
       p.outro('Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
@@ -356,7 +358,6 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         exit_code: result.exitCode ?? null,
       });
       if (result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
-      await offerSightmapSetup(chosen, options, onEvent);
       await showDemoGuide({
         agentName: chosen.definition.name,
         installPending: true,
@@ -386,6 +387,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           openTarget: options.printPrompt ? undefined : openTarget,
           onEvent,
         });
+        // Last item of the enrichment list — offered after the other three.
+        await offerSightmapSetup(chosen, options, onEvent);
       }
       p.outro('Finish the install in your agent — it will guide you from here.');
       await telemetry.flush();
@@ -473,7 +476,6 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // run must not launch the agent.
     if (!options.printPrompt) {
       await offerPluginSetup(chosen, auth.region, options, onEvent, reviewToolsConsent);
-      await offerSightmapSetup(chosen, options, onEvent);
     }
     await showDemoGuide({
       agentName: chosen.definition.name,
@@ -520,6 +522,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         if (enrichResult.exitCode !== 0) {
           telemetry.note('phase2_failed', { exit_code: enrichResult.exitCode ?? null });
         }
+        // Last item of the enrichment list — offered after the other three.
+        await offerSightmapSetup(chosen, options, onEvent);
       }
     } catch (error) {
       // Cancel (the integration multiselect) → user declined phase 2, fall
