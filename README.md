@@ -29,9 +29,10 @@ npx @subtextdev/subtext-wizard
 
 1. **Signs you in** — opens Subtext in your browser to log in or create your free account.
 2. **Fetches your capture snippet** — grabs the session-capture snippet for your org.
-3. **Asks about your stack** — pick the analytics and product tools you use (PostHog, Amplitude, Mixpanel, Sentry, Segment, and more) so setup can link them up.
-4. **Finds your coding agent** — detects Claude Code, Codex, Gemini CLI, Cursor, Windsurf, VS Code, Zed, or Claude Desktop.
-5. **Hands the install to your own agent** — no bundled agent; it drives the one you already use to wire up the capture snippet, MCP server, skills, and commands.
+3. **Installs the snippet directly when it can**: for Next.js, Remix, React Router, Nuxt, SvelteKit, Astro, Gatsby, Angular, Vite, Create React App, Vue CLI, and plain HTML sites, it shows you the exact edit and writes it once you confirm. Anything it can't place with certainty (monorepos, a Content-Security-Policy, unusual layouts) goes to your agent instead.
+4. **Asks about your stack** — pick the analytics and product tools you use (PostHog, Amplitude, Mixpanel, Sentry, Segment, and more) so setup can link them up.
+5. **Finds your coding agent** — detects Claude Code, Codex, Gemini CLI, Cursor, Windsurf, VS Code, Zed, or Claude Desktop.
+6. **Hands the rest to your own agent** — no bundled agent; it drives the one you already use to wire up the capture snippet, MCP server, skills, and commands.
 
 When it finishes, your agent is connected to your sessions. See the [Subtext repo](https://github.com/fullstorydev/subtext) for what it can do from there.
 
