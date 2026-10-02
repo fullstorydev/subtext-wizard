@@ -25,6 +25,7 @@ import {
 } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
 import { fetchCaptureSnippet } from './snippet.js';
+import { runStaticInstall } from './staticInstall/index.js';
 import { Telemetry } from './telemetry.js';
 
 export async function runWizard(options: WizardOptions): Promise<number> {
@@ -102,6 +103,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // fast path to a first captured session only installs the snippet, so we
     // don't need to know the analytics stack until we link the session URL in.
 
+    // Common frameworks get the snippet written by the wizard itself, which is
+    // faster and deterministic. Anything it can't place with certainty (or a
+    // declined/failed edit) falls through to the agent-driven install below.
+    const staticInstall = await runStaticInstall(snippet, options, onEvent);
+    const snippetInstalled = staticInstall.status !== 'fallback';
+
     // 3. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
     const spinner = p.spinner();
@@ -114,7 +121,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     );
     telemetry.note('agents_detected', { agents: detected.map((d) => d.definition.id) });
 
-    const chosen = await chooseAgent(detected, options);
+    const chosen = await chooseAgent(
+      detected,
+      options,
+      snippetInstalled
+        ? 'Which coding agent should review your sessions and run step 2?'
+        : undefined,
+    );
     const isTerminalRun = chosen !== MANUAL_CHOICE && chosen.definition.kind === 'terminal';
     const isAppRun = chosen !== MANUAL_CHOICE && chosen.definition.kind === 'app';
     selectedHarness = chosen === MANUAL_CHOICE ? 'manual' : chosen.definition.id;
@@ -159,7 +172,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const promptMode: PromptMode = isTerminalRun ? 'headless' : 'interactive';
 
     const snippetPrompt = buildSnippetPrompt({ snippet, mode: promptMode, telemetry: promptTelemetry });
-    printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
+    if (!snippetInstalled) printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
 
     // For terminal agents the install runs autonomously; name what it
     // auto-approves so the single pre-handoff gate below carries that consent
@@ -170,13 +183,14 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         ? (chosen.definition.autonomy ?? 'auto-accepting file edits')
         : 'auto-accepting file edits';
 
-    p.log.step(`${pc.bold('Step 1 of 2')} · Install the capture snippet`);
+    if (!snippetInstalled) p.log.step(`${pc.bold('Step 1 of 2')} · Install the capture snippet`);
 
     // 6. Pre-handoff transparency AND consent in one gate: the user reads the
     //    exact prompt the agent will run, and proceeding is the authorization.
     //    For terminal runs the proceed option names the autonomous run, so no
-    //    second confirm follows. --yes (CI) skips the gate.
-    if (!options.yes) {
+    //    second confirm follows. --yes (CI) skips the gate, and there's nothing
+    //    to hand off when the wizard already installed the snippet.
+    if (!options.yes && !snippetInstalled) {
       const proceedLabel =
         chosen === MANUAL_CHOICE
           ? 'Continue'
@@ -217,7 +231,19 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // The single funnel `start`. Sent per branch below (matching who owns
     // telemetry), exactly once — the two hand-offs of a terminal run are one
     // funnel entry with one `start` and one `complete`.
-    const sendStart = (harness: string) => telemetry.step('start', undefined, { harness });
+    // A static install did the snippet-phase steps the agent would otherwise
+    // report, so the wizard reports them right after the start.
+    const sendStart = (harness: string) => {
+      telemetry.step('start', undefined, { harness });
+      if (staticInstall.status === 'already-installed') {
+        telemetry.step('precheck', 'success', { already_installed: true, harness });
+      } else if (staticInstall.status === 'installed') {
+        telemetry.step('precheck', 'success', { already_installed: false, harness });
+        telemetry.step('explore', 'success', { framework: staticInstall.framework, csp_present: false, harness });
+        telemetry.step('plan', 'success', { approved: true, harness });
+        telemetry.step('install', 'success', { harness });
+      }
+    };
 
     // Build the enrich (phase-2) selection without letting a Ctrl+C on the
     // multiselect abort a run whose snippet already installed. Returns an empty
@@ -271,28 +297,32 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // copyable follow-up (we never drive a manual agent, so no second run). ---
     if (chosen === MANUAL_CHOICE) {
       sendStart('manual');
-      let copied = true;
-      try {
-        await clipboard.write(snippetPrompt);
-      } catch {
-        copied = false;
-      }
-      telemetry.note('manual_handoff', { clipboard: copied });
-      if (copied) {
-        p.log.success('The install prompt is on your clipboard.');
-        p.note(
-          'Paste it into any coding agent opened at this project folder.\nThe agent will walk you through the snippet install step by step.',
-          'Next step',
-        );
-      } else {
-        p.log.warn('Could not write to the clipboard — copy the prompt below.');
-        console.log(`\n${snippetPrompt}\n`);
+      let copied = false;
+      // Only the agent-driven install has a step-1 prompt to hand over.
+      if (!snippetInstalled) {
+        try {
+          await clipboard.write(snippetPrompt);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+        telemetry.note('manual_handoff', { clipboard: copied });
+        if (copied) {
+          p.log.success('The install prompt is on your clipboard.');
+          p.note(
+            'Paste it into any coding agent opened at this project folder.\nThe agent will walk you through the snippet install step by step.',
+            'Next step',
+          );
+        } else {
+          p.log.warn('Could not write to the clipboard — copy the prompt below.');
+          console.log(`\n${snippetPrompt}\n`);
+        }
       }
       // Plugin setup — we don't know the harness, so show every path.
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, onEvent);
       await showDemoGuide({
         agentName: 'your coding agent',
-        installPending: true,
+        installPending: !snippetInstalled,
         clipboardHoldsInstallPrompt: copied,
         yes: options.yes,
         onEvent,
@@ -336,10 +366,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         opensFolder: chosen.opensFolder,
         dir: options.dir,
       };
-      if (!pluginReady) sendStart(chosen.definition.id);
+      // With the snippet already in, the agent never runs a phase-1 prompt to
+      // log its own start, so the wizard sends it even when the plugin is ready.
+      if (!pluginReady || snippetInstalled) sendStart(chosen.definition.id);
       // --print-prompt is a dry run: the prompt was already printed above, so
       // don't open the app / hand off — synthesize a clean handoff result.
-      const result: LaunchResult = options.printPrompt
+      // Same when the snippet is already installed: there's nothing to hand off.
+      const result: LaunchResult = options.printPrompt || snippetInstalled
         ? { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false }
         : await chosen.definition.launch({
             prompt: snippetPrompt,
@@ -353,10 +386,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         mode: result.mode,
         exit_code: result.exitCode ?? null,
       });
-      if (result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
+      if (!snippetInstalled && result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
       await showDemoGuide({
         agentName: chosen.definition.name,
-        installPending: true,
+        installPending: !snippetInstalled,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
         // Suppressed under --print-prompt so the demo's "Open agent?" offer
@@ -384,7 +417,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
-      p.outro('Finish the install in your agent — it will guide you from here.');
+      p.outro(
+        snippetInstalled
+          ? 'Subtext capture is installed. Deploy to start capturing real user sessions.'
+          : 'Finish the install in your agent — it will guide you from here.',
+      );
       await telemetry.flush();
       return 0;
     }
@@ -434,8 +471,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       return { result, installSucceeded };
     };
 
-    // Phase 1 — install the snippet.
-    const { result, installSucceeded } = await driveLaunch(snippetPrompt);
+    // Phase 1 — install the snippet, unless the wizard already did.
+    const { result, installSucceeded } = snippetInstalled
+      ? { result: { mode: 'ran', exitCode: 0 } as LaunchResult, installSucceeded: true }
+      : await driveLaunch(snippetPrompt);
     telemetry.note('wizard_completed', {
       agent: chosen.definition.id,
       mode: result.mode,
@@ -447,7 +486,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // additionally requires the agent's own install-step marker; exit 0 without
     // it is recorded as `partial`. (When the prompt carried no marker
     // instructions, exit code is all we have.)
-    const installConfirmed = installSucceeded || promptTelemetry !== 'stdout';
+    const installConfirmed = snippetInstalled || installSucceeded || promptTelemetry !== 'stdout';
 
     if (result.exitCode !== 0) {
       // Phase 1 failed — the snippet isn't in, so there's nothing to review and
