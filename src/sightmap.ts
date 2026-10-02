@@ -161,7 +161,7 @@ export async function offerSightmapSetup(
   // --sightmap is the standing authorization; otherwise ask.
   if (!options.yes) {
     const yes = await p.confirm({
-      message: `Build a component sightmap so reviews name your UI? ${pc.dim(
+      message: `Install Sightmap: improve session review quality and efficiency with a semantic runtime map of your application ${pc.dim(
         `(installs ${SIGHTMAP_PACKAGE})`,
       )}`,
     });
