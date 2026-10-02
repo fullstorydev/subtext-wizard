@@ -15,7 +15,9 @@ export function makeOptions(overrides: Partial<WizardOptions> = {}): WizardOptio
     telemetry: false,
     region: 'us',
     printPrompt: false,
+    stubAgent: false,
     yes: true,
+    sightmap: false,
     debug: false,
     ...overrides,
   };

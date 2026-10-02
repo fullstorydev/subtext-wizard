@@ -24,6 +24,7 @@ import {
   type PromptTelemetry,
 } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
+import { offerSightmapSetup } from './sightmap.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { Telemetry } from './telemetry.js';
 
@@ -134,6 +135,15 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // that runs, so a terminal agent still gets the headless variant it needs.
     const printPromptForTesting = (label: string, prompt: string) => {
       if (options.printPrompt) console.log(`\n===== ${label} =====\n\n${prompt}\n`);
+    };
+
+    // --stub-agent is the other testing aid: unlike --print-prompt it never
+    // prints the prompt, it just logs that the step was stubbed. Used instead
+    // of --print-prompt when the prompt text itself isn't what's being tested
+    // (see driveLaunch and the app-run launch below for where this replaces a
+    // real agent invocation).
+    const stubAgentRun = (label: string) => {
+      if (options.stubAgent) p.log.info(pc.dim(`${label}: prompt ran!`));
     };
 
     // 5. Assemble the phase-1 (snippet) install prompt. Terminal agents get the
@@ -253,11 +263,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       p.note(
         readableNoteBody(
           [
-            'To get the most out of your captured sessions, three more steps:',
+            'To get the most out of your captured sessions, four more steps:',
             '',
             '  1. Identify users — tie each session to the signed-in person.',
             '  2. Link analytics — add the session URL to the tools you already use.',
             '  3. Mask sensitive data — tag PII so it stays out of capture.',
+            '  4. Build a sightmap: map your UI so reviews name components instead of selectors.',
             '',
             detail,
           ].join('\n'),
@@ -315,6 +326,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           yes: options.yes,
           onEvent,
         });
+        // Last item of the enrichment list — offered after the other three.
+        await offerSightmapSetup(MANUAL_CHOICE, options, onEvent);
       }
       p.outro('Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
@@ -339,15 +352,22 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       if (!pluginReady) sendStart(chosen.definition.id);
       // --print-prompt is a dry run: the prompt was already printed above, so
       // don't open the app / hand off — synthesize a clean handoff result.
-      const result: LaunchResult = options.printPrompt
-        ? { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false }
-        : await chosen.definition.launch({
-            prompt: snippetPrompt,
-            cwd: options.dir,
-            binaryPath: chosen.binaryPath,
-            debug: options.debug,
-            onEvent,
-          });
+      // --stub-agent does the same but logs "prompt ran!" instead.
+      let result: LaunchResult;
+      if (options.printPrompt) {
+        result = { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false };
+      } else if (options.stubAgent) {
+        stubAgentRun('STEP 1');
+        result = { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false };
+      } else {
+        result = await chosen.definition.launch({
+          prompt: snippetPrompt,
+          cwd: options.dir,
+          binaryPath: chosen.binaryPath,
+          debug: options.debug,
+          onEvent,
+        });
+      }
       telemetry.note('wizard_completed', {
         agent: chosen.definition.id,
         mode: result.mode,
@@ -359,9 +379,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         installPending: true,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
-        // Suppressed under --print-prompt so the demo's "Open agent?" offer
-        // can't launch the app during a dry run.
-        openTarget: options.printPrompt ? undefined : openTarget,
+        // Suppressed under --print-prompt/--stub-agent so the demo's "Open
+        // agent?" offer can't launch the app during a dry run.
+        openTarget: options.printPrompt || options.stubAgent ? undefined : openTarget,
         onEvent,
       });
       if (
@@ -380,9 +400,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           agentName: chosen.definition.name,
           clipboardBusy: result.clipboardHoldsPrompt,
           yes: options.yes,
-          openTarget: options.printPrompt ? undefined : openTarget,
+          openTarget: options.printPrompt || options.stubAgent ? undefined : openTarget,
           onEvent,
         });
+        // Last item of the enrichment list — offered after the other three.
+        await offerSightmapSetup(chosen, options, onEvent);
       }
       p.outro('Finish the install in your agent — it will guide you from here.');
       await telemetry.flush();
@@ -404,12 +426,19 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // share, and the funnel would lose them.
     const driveLaunch = async (
       launchPrompt: string,
+      label: string,
     ): Promise<{ result: LaunchResult; installSucceeded: boolean }> => {
       if (options.printPrompt) {
         // --print-prompt is a dry run: the prompt was already printed above, so
         // skip actually spawning the agent and report a clean no-op so the rest
         // of the flow (demo guide, phase-2 prompt) still runs.
-        p.log.info(pc.dim('--print-prompt — skipping the agent run.'));
+        p.log.info(pc.dim('--print-prompt: skipping the agent run.'));
+        return { result: { mode: 'ran', exitCode: 0 }, installSucceeded: true };
+      }
+      if (options.stubAgent) {
+        // --stub-agent skips the same real launch, but without ever printing
+        // the prompt — just a short confirmation that this step was stubbed.
+        stubAgentRun(label);
         return { result: { mode: 'ran', exitCode: 0 }, installSucceeded: true };
       }
       const sentMarkerSteps = new Set<string>();
@@ -435,7 +464,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     };
 
     // Phase 1 — install the snippet.
-    const { result, installSucceeded } = await driveLaunch(snippetPrompt);
+    const { result, installSucceeded } = await driveLaunch(snippetPrompt, 'STEP 1');
     telemetry.note('wizard_completed', {
       agent: chosen.definition.id,
       mode: result.mode,
@@ -466,10 +495,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // one exists, raw MCP entry otherwise) so the agent can review sessions,
     // then show the first-ASR guide. Consent was captured pre-handoff
     // (reviewToolsConsent) so this runs without a fresh prompt. Skipped under
-    // --print-prompt: the packaged-plugin path spawns the agent CLI, and a dry
-    // run must not launch the agent.
-    if (!options.printPrompt) {
+    // --print-prompt/--stub-agent: the packaged-plugin path spawns the agent
+    // CLI, and a dry run must not launch the agent.
+    if (!options.printPrompt && !options.stubAgent) {
       await offerPluginSetup(chosen, auth.region, options, onEvent, reviewToolsConsent);
+    } else if (options.stubAgent) {
+      stubAgentRun('plugin setup');
     }
     await showDemoGuide({
       agentName: chosen.definition.name,
@@ -477,16 +508,17 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       // been refused or abandoned — frame the guide as post-install work.
       installPending: !installConfirmed,
       yes: options.yes,
-      // Suppressed under --print-prompt so the demo's "Open agent?" offer can't
-      // spawn the agent during a dry run.
-      openTarget: options.printPrompt
-        ? undefined
-        : {
-            kind: 'terminal',
-            name: chosen.definition.name,
-            binaryPath: chosen.binaryPath,
-            dir: options.dir,
-          },
+      // Suppressed under --print-prompt/--stub-agent so the demo's "Open
+      // agent?" offer can't spawn the agent during a dry run.
+      openTarget:
+        options.printPrompt || options.stubAgent
+          ? undefined
+          : {
+              kind: 'terminal',
+              name: chosen.definition.name,
+              binaryPath: chosen.binaryPath,
+              dir: options.dir,
+            },
       onEvent,
     });
 
@@ -511,11 +543,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           telemetry: promptTelemetry,
         });
         printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
-        const { result: enrichResult } = await driveLaunch(enrichPrompt);
+        const { result: enrichResult } = await driveLaunch(enrichPrompt, 'STEP 2');
         telemetry.note('phase2_completed', { exit_code: enrichResult.exitCode ?? null });
         if (enrichResult.exitCode !== 0) {
           telemetry.note('phase2_failed', { exit_code: enrichResult.exitCode ?? null });
         }
+        // Last item of the enrichment list — offered after the other three.
+        await offerSightmapSetup(chosen, options, onEvent);
       }
     } catch (error) {
       // Cancel (the integration multiselect) → user declined phase 2, fall
