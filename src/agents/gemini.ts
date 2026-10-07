@@ -30,6 +30,7 @@ export const geminiCli: AgentDefinition = {
   name: 'Gemini CLI',
   kind: 'terminal',
   autonomy: 'auto-accepting file edits (shell commands are not auto-approved)',
+  consent: 'edit files',
   async detect() {
     const binaryPath = await which('gemini');
     if (!binaryPath) return null;

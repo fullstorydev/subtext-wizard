@@ -199,11 +199,7 @@ export async function selectIntegrations(
   const detected = detectInstalledIntegrations(options.dir);
   if (detected.length > 0) {
     const names = detected.map((i) => brandPink(i.label)).join(', ');
-    p.log.success(
-      `Detected ${names} in package.json — Subtext will link session URLs into ${
-        detected.length > 1 ? 'them' : 'it'
-      }.`,
-    );
+    p.log.success(`Found ${names} in package.json.`);
     const addMore = await p.confirm({
       message: 'Add any other analytics or product tools to link?',
       initialValue: false,
@@ -215,7 +211,14 @@ export async function selectIntegrations(
     return promptIntegrationPicker(detected);
   }
 
-  return promptIntegrationPicker([]);
+  // Nothing in package.json: don't offer a catalog of tools the app doesn't
+  // have. Script-tag installs are the one thing detection misses, so ask.
+  const missed = await p.confirm({
+    message: 'No analytics SDKs found in package.json. Add one loaded another way (e.g. a script tag)?',
+    initialValue: false,
+  });
+  if (p.isCancel(missed)) throw new CancelledError();
+  return missed ? promptIntegrationPicker([]) : { integrations: [], other: [] };
 }
 
 /**

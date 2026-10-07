@@ -24,6 +24,8 @@ export interface LaunchContext {
   cwd: string;
   binaryPath?: string;
   debug: boolean;
+  /** What this run is for, for the progress line ("Installing the snippet"). */
+  label?: string;
   onEvent?: (event: string, properties?: Record<string, unknown>) => void;
   /** Per-step telemetry the wizard parses out of the terminal agent's stdout
    * (see telemetry-marker.ts). The agent never holds a credential — it only
@@ -37,6 +39,9 @@ export interface LaunchResult {
   exitCode?: number;
   /** Instructions to show the user after a handoff. */
   followUp?: string[];
+  /** Terminal runs that capture it: the agent's closing message, for the
+   * caller to show (or not) instead of the agent printing it inline. */
+  finalMessage?: string;
   /** Handoff only: the install prompt was copied to the clipboard, so later
    * clipboard offers (the demo prompt) must warn before clobbering it. */
   clipboardHoldsPrompt?: boolean;
@@ -51,6 +56,8 @@ export interface AgentDefinition {
    * inside its sandbox", …). Shown in the pre-launch confirmation so the user
    * consents to what actually happens — command execution included. */
   autonomy?: string;
+  /** Terminal agents: the short consent line, completing "<name> will …". */
+  consent?: string;
   /** Returns detection info if this agent is installed, else null. */
   detect(): Promise<DetectedAgent | null>;
   launch(ctx: LaunchContext): Promise<LaunchResult>;

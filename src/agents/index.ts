@@ -31,6 +31,7 @@ export const MANUAL_CHOICE = 'manual';
 export async function chooseAgent(
   detected: DetectedAgent[],
   options: WizardOptions,
+  message = 'Which coding agent should run the install?',
 ): Promise<DetectedAgent | typeof MANUAL_CHOICE> {
   if (options.agent) {
     const match = detected.find((d) => d.definition.id === options.agent);
@@ -51,7 +52,7 @@ export async function chooseAgent(
   }
 
   const choice = await p.select({
-    message: 'Which coding agent should run the install?',
+    message,
     options: [
       ...detected.map((d) => ({
         value: d.definition.id,
@@ -72,7 +73,7 @@ export async function chooseAgent(
   if (choice === MANUAL_CHOICE) return MANUAL_CHOICE;
 
   const chosen = detected.find((d) => d.definition.id === choice)!;
-  if (chosen.detail) {
+  if (chosen.detail && options.debug) {
     p.log.info(pc.dim(`Using ${chosen.definition.name} at ${chosen.detail}`));
   }
   return chosen;

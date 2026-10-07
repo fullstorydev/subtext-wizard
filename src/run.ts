@@ -1,5 +1,8 @@
 import * as p from '@clack/prompts';
 import clipboard from 'clipboardy';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import pc from 'picocolors';
 import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
@@ -14,9 +17,9 @@ import {
   selectIntegrations,
   type IntegrationSelection,
 } from './integrations.js';
-import { readableNoteBody, showLogo } from './logo.js';
+import { showLogo } from './logo.js';
 import { guidePluginSetup } from './plugin.js';
-import { offerPluginSetup } from './pluginSetup.js';
+import { offerPluginSetup, subtextPluginInstalled } from './pluginSetup.js';
 import {
   buildEnrichPrompt,
   buildSnippetPrompt,
@@ -24,7 +27,18 @@ import {
   type PromptTelemetry,
 } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
+import {
+  EXTRAS_REPORT,
+  SETUP_REPORT,
+  detectAuthLibraries,
+  readExtrasResults,
+  showExtrasPlan,
+  showExtrasResults,
+  type ExtrasResults,
+  type ExtrasScope,
+} from './extras.js';
 import { fetchCaptureSnippet } from './snippet.js';
+import { runStaticInstall } from './staticInstall/index.js';
 import { Telemetry } from './telemetry.js';
 
 export async function runWizard(options: WizardOptions): Promise<number> {
@@ -35,9 +49,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
   await showLogo();
   p.intro(`${pc.bgCyan(pc.black(' Subtext '))} setup ${pc.dim(`v${WIZARD_VERSION}`)}`);
-  p.log.message(
-    `Setting up session capture in ${pc.cyan(options.dir)} using your own coding agent.`,
-  );
+  p.log.message(pc.dim(`Setting up session capture in ${tildify(options.dir)}`));
   if (options.mock) {
     p.log.warn('Mock mode: no real network calls will be made.');
     if (!options.apiKey) {
@@ -87,7 +99,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const telemetryEnabled = options.telemetry;
     if (telemetryEnabled && !options.printPrompt) {
       p.log.info(
-        `Anonymous install telemetry is on — step progress & timings, never your code or data. Opt out with ${pc.cyan('--no-telemetry')}.`,
+        pc.dim(`Anonymous install telemetry is on: step progress and timings, never your code or data. Opt out with --no-telemetry.`),
       );
     }
     // The telemetry endpoint needs an authenticated session, so delivery can
@@ -102,19 +114,25 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // fast path to a first captured session only installs the snippet, so we
     // don't need to know the analytics stack until we link the session URL in.
 
+    // Common frameworks get the snippet written by the wizard itself, which is
+    // faster and deterministic. Anything it can't place with certainty (or a
+    // declined/failed edit) falls through to the agent-driven install below.
+    const staticInstall = await runStaticInstall(snippet, options, onEvent);
+    const snippetInstalled = staticInstall.status !== 'fallback';
+
     // 3. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
-    const spinner = p.spinner();
-    spinner.start('Detecting coding agents on this machine…');
+    // No "Detected: …" line; the picker right after lists them.
     const detected = await detectAgents();
-    spinner.stop(
-      detected.length > 0
-        ? `Detected: ${detected.map((d) => d.definition.name).join(', ')}`
-        : 'No coding agents detected.',
-    );
     telemetry.note('agents_detected', { agents: detected.map((d) => d.definition.id) });
 
-    const chosen = await chooseAgent(detected, options);
+    const chosen = await chooseAgent(
+      detected,
+      options,
+      snippetInstalled
+        ? 'Which coding agent should review your sessions and run step 2?'
+        : undefined,
+    );
     const isTerminalRun = chosen !== MANUAL_CHOICE && chosen.definition.kind === 'terminal';
     const isAppRun = chosen !== MANUAL_CHOICE && chosen.definition.kind === 'app';
     selectedHarness = chosen === MANUAL_CHOICE ? 'manual' : chosen.definition.id;
@@ -159,24 +177,25 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const promptMode: PromptMode = isTerminalRun ? 'headless' : 'interactive';
 
     const snippetPrompt = buildSnippetPrompt({ snippet, mode: promptMode, telemetry: promptTelemetry });
-    printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
+    if (!snippetInstalled) printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
 
     // For terminal agents the install runs autonomously; name what it
     // auto-approves so the single pre-handoff gate below carries that consent
-    // itself — no separate "are you sure" confirm. Also reused by the phase-2
-    // enrich gate. MANUAL_CHOICE has no definition to read from.
+    // itself — no separate "are you sure" confirm. MANUAL_CHOICE has no
+    // definition to read from.
     const autonomy =
       chosen !== MANUAL_CHOICE
         ? (chosen.definition.autonomy ?? 'auto-accepting file edits')
         : 'auto-accepting file edits';
 
-    p.log.step(`${pc.bold('Step 1 of 2')} · Install the capture snippet`);
+    if (!snippetInstalled) p.log.step(pc.bold('Install the capture snippet'));
 
     // 6. Pre-handoff transparency AND consent in one gate: the user reads the
     //    exact prompt the agent will run, and proceeding is the authorization.
     //    For terminal runs the proceed option names the autonomous run, so no
-    //    second confirm follows. --yes (CI) skips the gate.
-    if (!options.yes) {
+    //    second confirm follows. --yes (CI) skips the gate, and there's nothing
+    //    to hand off when the wizard already installed the snippet.
+    if (!options.yes && !snippetInstalled) {
       const proceedLabel =
         chosen === MANUAL_CHOICE
           ? 'Continue'
@@ -203,9 +222,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // this before the handoff (guidePluginSetup); the manual path only prints
     // instructions; --yes proceeds without asking.
     let reviewToolsConsent: boolean | undefined;
-    if (isTerminalRun && !options.yes) {
+    if (isTerminalRun && !options.yes && (await subtextPluginInstalled(chosen, auth.region, options))) {
+      // offerPluginSetup reports it as already installed later; nothing to ask.
+      reviewToolsConsent = true;
+    } else if (isTerminalRun && !options.yes) {
       const answer = await p.confirm({
-        message: `After the install, add Subtext review tools to ${chosen.definition.name} so it can replay your captured sessions?`,
+        message: `Install the Subtext plugin in ${chosen.definition.name}? ${pc.dim('(lets it replay your sessions)')}`,
       });
       // Ctrl+C aborts the whole run: nothing has been installed yet, so cancel
       // must mean "stop" — consistent with every other pre-handoff prompt.
@@ -217,93 +239,85 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // The single funnel `start`. Sent per branch below (matching who owns
     // telemetry), exactly once — the two hand-offs of a terminal run are one
     // funnel entry with one `start` and one `complete`.
-    const sendStart = (harness: string) => telemetry.step('start', undefined, { harness });
-
-    // Build the enrich (phase-2) selection without letting a Ctrl+C on the
-    // multiselect abort a run whose snippet already installed. Returns an empty
-    // selection on cancel so the agent still gets a (tool-detecting) prompt.
-    const followUpSelection = async (): Promise<IntegrationSelection> => {
-      try {
-        return await selectIntegrations(options);
-      } catch (error) {
-        if (error instanceof CancelledError) return { integrations: [], other: [] };
-        throw error;
+    // A static install did the snippet-phase steps the agent would otherwise
+    // report, so the wizard reports them right after the start.
+    const sendStart = (harness: string) => {
+      telemetry.step('start', undefined, { harness });
+      if (staticInstall.status === 'already-installed') {
+        telemetry.step('precheck', 'success', { already_installed: true, harness });
+      } else if (staticInstall.status === 'installed') {
+        telemetry.step('precheck', 'success', { already_installed: false, harness });
+        telemetry.step('explore', 'success', { framework: staticInstall.framework, csp_present: false, harness });
+        telemetry.step('plan', 'success', { approved: true, harness });
+        telemetry.step('install', 'success', { harness });
       }
     };
 
-    // Phase-2 gate, shown before the integration picker: lay out the
-    // enrichment steps that follow, then ask whether to continue. `detail`
-    // names how it runs — an autonomous re-run for terminal agents, a copyable
-    // follow-up for app/manual hand-offs. Returns false on decline or Ctrl+C,
-    // and never throws: a "no" here must not fail a run whose snippet is in.
-    const confirmContinueEnriching = async (detail: string): Promise<boolean> => {
+    // The optional extras gate (identify users, link analytics, mask PII).
+    // Returns false on decline or Ctrl+C and never throws: a "no" here must
+    // not fail a run whose snippet is in. It also holds the terminal while the
+    // user is off trying the demo.
+    const confirmExtras = async (): Promise<boolean> => {
       if (options.yes) return true;
-      // Gate step 2 on the user finishing the demo above rather than prompting
-      // over it. The demo guide is a "leave the terminal and watch a session
-      // review" action; surfacing the enrichment decision (and its details)
-      // right on top of it competes for their attention. So hold here with a
-      // minimal prompt — keeping step 2 out of view — until they come back and
-      // signal they're ready. "No" is a clean exit for anyone done for now.
-      const ready = await p.confirm({
-        message:
-          "Try the demo above first — this waits for you. Once you've watched a session review, press Enter to finish setting up Subtext, or choose No if you're done for now.",
+      const answer = await p.confirm({
+        message: `Continue to optional extras? ${pc.dim('(identify users, link analytics, mask PII)')}`,
         initialValue: true,
       });
-      if (p.isCancel(ready) || !ready) return false;
-      p.note(
-        readableNoteBody(
-          [
-            'To get the most out of your captured sessions, three more steps:',
-            '',
-            '  1. Identify users — tie each session to the signed-in person.',
-            '  2. Link analytics — add the session URL to the tools you already use.',
-            '  3. Mask sensitive data — tag PII so it stays out of capture.',
-            '',
-            detail,
-          ].join('\n'),
-        ),
-        `${pc.bold('Step 2 of 2')} · Enrich your Subtext setup (optional)`,
-      );
-      return true;
+      return !p.isCancel(answer) && answer;
+    };
+
+    // Check package.json for what the extras can attach to, so the agent pass
+    // is scoped (or visibly empty) before anything runs. A Ctrl+C on the
+    // optional picker maps to an empty selection rather than aborting.
+    const scopeExtras = async (): Promise<ExtrasScope> => {
+      let selection: IntegrationSelection = { integrations: [], other: [] };
+      try {
+        selection = await selectIntegrations(options);
+      } catch (error) {
+        if (!(error instanceof CancelledError)) throw error;
+      }
+      const scope = { selection, authLibraries: detectAuthLibraries(options.dir) };
+      showExtrasPlan(scope);
+      return scope;
     };
 
     // ----- Manual handoff: copy the phase-1 prompt, then offer phase 2 as a
     // copyable follow-up (we never drive a manual agent, so no second run). ---
     if (chosen === MANUAL_CHOICE) {
       sendStart('manual');
-      let copied = true;
-      try {
-        await clipboard.write(snippetPrompt);
-      } catch {
-        copied = false;
-      }
-      telemetry.note('manual_handoff', { clipboard: copied });
-      if (copied) {
-        p.log.success('The install prompt is on your clipboard.');
-        p.note(
-          'Paste it into any coding agent opened at this project folder.\nThe agent will walk you through the snippet install step by step.',
-          'Next step',
-        );
-      } else {
-        p.log.warn('Could not write to the clipboard — copy the prompt below.');
-        console.log(`\n${snippetPrompt}\n`);
+      let copied = false;
+      // Only the agent-driven install has a step-1 prompt to hand over.
+      if (!snippetInstalled) {
+        try {
+          await clipboard.write(snippetPrompt);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+        telemetry.note('manual_handoff', { clipboard: copied });
+        if (copied) {
+          p.log.success('The install prompt is on your clipboard.');
+          p.note(
+            'Paste it into any coding agent opened at this project folder.\nThe agent will walk you through the snippet install step by step.',
+            'Next step',
+          );
+        } else {
+          p.log.warn('Could not write to the clipboard — copy the prompt below.');
+          console.log(`\n${snippetPrompt}\n`);
+        }
       }
       // Plugin setup — we don't know the harness, so show every path.
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, onEvent);
       await showDemoGuide({
         agentName: 'your coding agent',
-        installPending: true,
+        installPending: !snippetInstalled,
         clipboardHoldsInstallPrompt: copied,
         yes: options.yes,
         onEvent,
       });
-      if (
-        await confirmContinueEnriching(
-          "I'll prepare a follow-up prompt you can paste into your agent when you're ready.",
-        )
-      ) {
+      if (await confirmExtras()) {
         const enrichPrompt = buildEnrichPrompt({
-          selection: await followUpSelection(),
+          ...(await scopeExtras()),
           mode: 'interactive',
           telemetry: 'none',
         });
@@ -316,7 +330,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
-      p.outro('Run this installer again any time with: npx @subtextdev/subtext-wizard');
+      p.outro(snippetInstalled ? DEPLOY_OUTRO : 'Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
       return 0;
     }
@@ -336,10 +350,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         opensFolder: chosen.opensFolder,
         dir: options.dir,
       };
-      if (!pluginReady) sendStart(chosen.definition.id);
+      // With the snippet already in, the agent never runs a phase-1 prompt to
+      // log its own start, so the wizard sends it even when the plugin is ready.
+      if (!pluginReady || snippetInstalled) sendStart(chosen.definition.id);
       // --print-prompt is a dry run: the prompt was already printed above, so
       // don't open the app / hand off — synthesize a clean handoff result.
-      const result: LaunchResult = options.printPrompt
+      // Same when the snippet is already installed: there's nothing to hand off.
+      const result: LaunchResult = options.printPrompt || snippetInstalled
         ? { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false }
         : await chosen.definition.launch({
             prompt: snippetPrompt,
@@ -353,10 +370,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         mode: result.mode,
         exit_code: result.exitCode ?? null,
       });
-      if (result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
+      if (!snippetInstalled && result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
       await showDemoGuide({
         agentName: chosen.definition.name,
-        installPending: true,
+        installPending: !snippetInstalled,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
         // Suppressed under --print-prompt so the demo's "Open agent?" offer
@@ -364,13 +381,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         openTarget: options.printPrompt ? undefined : openTarget,
         onEvent,
       });
-      if (
-        await confirmContinueEnriching(
-          "I'll prepare a follow-up prompt you can paste into your agent when you're ready.",
-        )
-      ) {
+      if (await confirmExtras()) {
         const enrichPrompt = buildEnrichPrompt({
-          selection: await followUpSelection(),
+          ...(await scopeExtras()),
           mode: 'interactive',
           telemetry: 'none',
         });
@@ -384,7 +397,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
-      p.outro('Finish the install in your agent — it will guide you from here.');
+      p.outro(
+        snippetInstalled
+          ? DEPLOY_OUTRO
+          : 'Finish the install in your agent — it will guide you from here.',
+      );
       await telemetry.flush();
       return 0;
     }
@@ -404,6 +421,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // share, and the funnel would lose them.
     const driveLaunch = async (
       launchPrompt: string,
+      label: string,
     ): Promise<{ result: LaunchResult; installSucceeded: boolean }> => {
       if (options.printPrompt) {
         // --print-prompt is a dry run: the prompt was already printed above, so
@@ -419,6 +437,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         cwd: options.dir,
         binaryPath: chosen.binaryPath,
         debug: options.debug,
+        label,
         onEvent,
         // Per-step markers the agent printed to stdout. The wizard sends them
         // with its own token, so no credential ever reaches the agent; the
@@ -434,8 +453,14 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       return { result, installSucceeded };
     };
 
-    // Phase 1 — install the snippet.
-    const { result, installSucceeded } = await driveLaunch(snippetPrompt);
+    // Phase 1 — install the snippet, unless the wizard already did.
+    const { result, installSucceeded } = snippetInstalled
+      ? { result: { mode: 'ran', exitCode: 0 } as LaunchResult, installSucceeded: true }
+      : await driveLaunch(snippetPrompt, 'Installing the snippet');
+    // Claude Code hands its closing message back instead of streaming it.
+    if (!snippetInstalled && result.finalMessage) {
+      p.log.message(pc.dim(result.finalMessage));
+    }
     telemetry.note('wizard_completed', {
       agent: chosen.definition.id,
       mode: result.mode,
@@ -447,7 +472,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // additionally requires the agent's own install-step marker; exit 0 without
     // it is recorded as `partial`. (When the prompt carried no marker
     // instructions, exit code is all we have.)
-    const installConfirmed = installSucceeded || promptTelemetry !== 'stdout';
+    const installConfirmed = snippetInstalled || installSucceeded || promptTelemetry !== 'stdout';
 
     if (result.exitCode !== 0) {
       // Phase 1 failed — the snippet isn't in, so there's nothing to review and
@@ -494,33 +519,38 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // work. A decline or a Ctrl+C here is NOT a failure: the snippet (the thing
     // that matters for capture) is already in, so we must never let this reach
     // the outer catch and misreport the run as cancelled/failed.
+    let extras: ExtrasResults | undefined;
+    let extrasRan = false;
     try {
-      if (
-        await confirmContinueEnriching(
-          `This runs as another autonomous pass with ${chosen.definition.name} in ${options.dir}, ${autonomy}.`,
-        )
-      ) {
-        // followUpSelection (not selectIntegrations) so a Ctrl+C on the
-        // optional picker maps to an empty selection and the enrich run still
-        // proceeds — the same handling the app/manual paths use. Cancelling the
-        // picker shouldn't silently drop a phase the user already opted into.
-        const selection = await followUpSelection();
-        const enrichPrompt = buildEnrichPrompt({
-          selection,
-          mode: 'headless',
-          telemetry: promptTelemetry,
-        });
-        printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
-        const { result: enrichResult } = await driveLaunch(enrichPrompt);
-        telemetry.note('phase2_completed', { exit_code: enrichResult.exitCode ?? null });
-        if (enrichResult.exitCode !== 0) {
-          telemetry.note('phase2_failed', { exit_code: enrichResult.exitCode ?? null });
+      if (await confirmExtras()) {
+        const scope = await scopeExtras();
+        // The consent for this autonomous pass sits right before it starts,
+        // after the user has seen exactly what it will do.
+        const go = options.yes
+          ? true
+          : await p.confirm({
+              message: `${chosen.definition.name} will ${chosen.definition.consent ?? 'edit files'}. Continue?`,
+            });
+        if (go === true) {
+          const enrichPrompt = buildEnrichPrompt({ ...scope, mode: 'headless', telemetry: promptTelemetry });
+          printPromptForTesting('STEP 2: enrichment prompt', enrichPrompt);
+          const startedAt = Date.now();
+          const { result: enrichResult } = await driveLaunch(enrichPrompt, 'Adding the extras');
+          extrasRan = true;
+          telemetry.note('phase2_completed', { exit_code: enrichResult.exitCode ?? null });
+          if (enrichResult.exitCode !== 0) {
+            telemetry.note('phase2_failed', { exit_code: enrichResult.exitCode ?? null });
+          }
+          // Our own summary from the agent's result file; its raw message is
+          // only the fallback when the file never got written.
+          extras = readExtrasResults(options.dir, startedAt);
+          if (extras) showExtrasResults(extras);
+          else if (enrichResult.finalMessage) p.log.message(pc.dim(enrichResult.finalMessage));
         }
       }
     } catch (error) {
-      // Cancel (the integration multiselect) → user declined phase 2, fall
-      // through cleanly. Any other error → note it, but still close the funnel
-      // as a success: enrichment is optional; the snippet install stands.
+      // Enrichment is optional and the snippet install stands, so anything
+      // thrown here is noted, never surfaced as a failed run.
       if (!(error instanceof CancelledError)) {
         telemetry.note('phase2_failed', {
           error: error instanceof Error ? error.message : String(error),
@@ -532,9 +562,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     telemetry.step('complete', installConfirmed ? 'success' : 'partial', {
       harness: chosen.definition.id,
     });
-    p.outro(
-      'Subtext install finished. Review the changes (and any subtext-*-report.md files), then deploy to capture real user sessions.',
-    );
+    p.outro(terminalOutro(options.dir, !snippetInstalled, extrasRan, extras));
     await telemetry.flush();
     return 0;
   } catch (error) {
@@ -558,4 +586,29 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     await telemetry.flush();
     return 1;
   }
+}
+
+function tildify(dir: string): string {
+  const home = os.homedir();
+  return dir === home || dir.startsWith(home + '/') ? `~${dir.slice(home.length)}` : dir;
+}
+
+const DEPLOY_OUTRO = 'Subtext capture is installed. Deploy to start capturing real user sessions.';
+
+/** The closing line, matched to what actually happened in the run. */
+function terminalOutro(
+  dir: string,
+  agentInstalledSnippet: boolean,
+  extrasRan: boolean,
+  extras: ExtrasResults | undefined,
+): string {
+  // Only point at reports this run could have written.
+  const candidates = [...(extrasRan ? [EXTRAS_REPORT] : []), ...(agentInstalledSnippet ? [SETUP_REPORT] : [])];
+  const report = candidates.find((f) => fs.existsSync(path.join(dir, f)));
+  const details = report ? `\nDetails in ${report}` : '';
+  if (!extrasRan) return `${DEPLOY_OUTRO}${details}`;
+  if (extras && extras.filesChanged.length === 0) {
+    return `No other code changes were needed. Deploy to start capturing real user sessions.${details}`;
+  }
+  return `Review the changes, then deploy to start capturing real user sessions.${details}`;
 }
