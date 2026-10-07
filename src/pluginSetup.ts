@@ -352,6 +352,16 @@ interface PackagedPlugin {
 }
 
 /** The scriptable plugin install for this harness, if it has one. */
+/** Whether the packaged plugin is already in place, so the wizard can skip asking. */
+export async function subtextPluginInstalled(
+  chosen: DetectedAgent,
+  region: Region,
+  options: WizardOptions,
+): Promise<boolean> {
+  const plugin = packagedPlugin(chosen, options);
+  return plugin !== null && region !== 'eu' && !options.mock && (await plugin.alreadyInstalled());
+}
+
 function packagedPlugin(chosen: DetectedAgent, options: WizardOptions): PackagedPlugin | null {
   const { binaryPath } = chosen;
   if (!binaryPath) return null;

@@ -28,6 +28,7 @@ export const codexCli: AgentDefinition = {
   name: 'Codex CLI',
   kind: 'terminal',
   autonomy: 'auto-accepting file edits and commands inside its workspace sandbox',
+  consent: 'edit files and run commands in its sandbox',
   async detect() {
     const binaryPath = await which('codex');
     if (!binaryPath) return null;

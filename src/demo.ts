@@ -21,7 +21,7 @@ const DEMO_PROMPT_LINES = [
   'session and walk me through it: which pages I visited, what I interacted',
   'with, and anything that looked broken or confusing along the way.',
   'If the Subtext tools return an authentication or authorization error,',
-  'stop and tell me — I likely need to sign in to Subtext in this agent first.',
+  'stop and tell me. I likely need to sign in to Subtext in this agent first.',
 ];
 
 export const DEMO_PROMPT = DEMO_PROMPT_LINES.join(' ');
@@ -48,39 +48,24 @@ export interface DemoGuideContext {
 }
 
 export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
-  const lead = ctx.installPending
-    ? `Once the install finishes, make sure everything works.`
-    : `Installation complete — let's make sure everything works.`;
-  // clack renders note bodies dimmed; readableNoteBody resets per line so the
-  // steps read at full strength. The demo prompt itself is NOT in the box — it
-  // prints as a pink block in the timeline next to the copy action below, so
-  // it's clear which text the "copy?" question refers to.
-  p.note(
-    readableNoteBody(
-      [
-        lead,
-        pc.bold('Follow these steps:'),
-        '',
-        '1. Start (or restart) your local dev server so the new snippet is live.',
-        '2. Open the app in your browser and click around for a minute —',
-        '   Subtext is capturing your session as you go.',
-        `3. Open ${ctx.agentName} at this project and paste in the demo prompt`,
-        '   shown below — that part is the agent\'s job.',
-        '   The first time it reaches for a Subtext tool, your agent will ask you',
-        '   to sign in to Subtext — approve it so the tools can read your sessions.',
-        '',
-        pc.dim('Captured sessions can take a minute or two to show up.'),
-      ].join('\n'),
-    ),
-    'First run',
-  );
+  // The user's to-do list goes in the box at full strength (clack dims note
+  // bodies, readableNoteBody undoes that); everything around it stays quiet.
+  const steps = [
+    ...(ctx.installPending ? [`Let ${ctx.agentName} finish the install`] : []),
+    'Restart your dev server',
+    'Open the app and click around for a minute or two',
+    `Paste the demo prompt into ${ctx.agentName}`,
+  ].map((step, i) => `${i + 1}. ${pc.bold(step)}`);
+  steps.push(pc.dim('   (approve the Subtext sign-in when asked)'));
+  p.note(readableNoteBody(steps.join('\n')), 'Next steps');
   ctx.onEvent('demo_guide_shown', { install_pending: ctx.installPending });
 
-  // The agent-facing prompt, in brand pink, as its own timeline block right
-  // above the copy question — clack anchors the active prompt at the bottom,
-  // so the prompt has to sit just before it (nothing can render below a live
-  // question). This keeps it out of the box and directly beside the action.
-  p.log.message(DEMO_PROMPT_LINES.map((line) => brandPink(line)).join('\n'));
+  // Framed and titled so it reads as text for the agent, not more
+  // instructions for the user.
+  p.note(
+    readableNoteBody(DEMO_PROMPT_LINES.map((line) => brandPink(line)).join('\n')),
+    ctx.yes ? 'Demo prompt' : "Demo prompt (we'll copy this for you)",
+  );
 
   if (ctx.yes) return;
 
@@ -91,6 +76,9 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
     clipboardBusy: ctx.clipboardHoldsInstallPrompt,
     label: 'demo prompt',
     readyHint: "after you've clicked around",
+    // Opening the agent before there's a captured session makes the first
+    // review come up empty, so the confirm doubles as the "I'm ready" pause.
+    confirmHint: "press Enter once you've restarted and clicked around",
     onEvent: ctx.onEvent,
     copiedEvent: 'demo_prompt_copied',
     openedEvent: 'demo_agent_opened',

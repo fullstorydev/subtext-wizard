@@ -5,8 +5,7 @@ import pc from 'picocolors';
 import type { WizardOptions } from '../config.js';
 import { CancelledError } from '../integrations.js';
 import { findCsp, findExistingSnippet } from './checks.js';
-import { detectTarget } from './detect.js';
-import { buildEdit, snippetBody } from './edits.js';
+import { detectFramework } from './frameworks/index.js';
 import { readProject } from './project.js';
 
 /**
@@ -39,35 +38,38 @@ export type StaticOutcome =
 export function planStaticInstall(dir: string, snippetHtml: string): StaticPlan {
   try {
     const project = readProject(dir);
-    const detection = detectTarget(project);
-    const targetFile = detection.ok ? [detection.target.file] : [];
+    const detection = detectFramework(project);
+    const targetFile = detection.ok ? [detection.plan.file] : [];
 
     const existing = findExistingSnippet(project, targetFile);
     if (existing) return { kind: 'already-installed', file: existing };
 
     if (!detection.ok) return { kind: 'fallback', reason: detection.reason, framework: detection.framework };
-    const { framework, target } = detection;
+    const { plan } = detection;
+    const { framework, file } = plan;
 
-    const csp = findCsp(project, target.file);
+    const csp = findCsp(project, file);
     if (csp) return { kind: 'fallback', reason: `a Content-Security-Policy needs updating (${csp})`, framework };
 
     const body = snippetBody(snippetHtml);
     if (!body) return { kind: 'fallback', reason: 'unexpected snippet format', framework };
+    const snippet = { html: snippetHtml, body };
 
-    const abs = path.join(dir, target.file);
-    const creating = target.kind === 'gatsby-ssr' || (target.kind === 'next-pages' && target.create);
-    const original = creating ? undefined : fs.readFileSync(abs, 'utf8');
-    const result = buildEdit(target, original, snippetHtml, body, project.typescript);
+    const original = 'create' in plan ? undefined : fs.readFileSync(path.join(dir, file), 'utf8');
+    const result = 'create' in plan ? plan.create(snippet) : plan.edit(original!, snippet);
     if (!result) {
-      return { kind: 'fallback', reason: `couldn't find a single safe insertion point in ${target.file}`, framework };
+      return { kind: 'fallback', reason: `couldn't find a single safe insertion point in ${file}`, framework };
     }
-    return {
-      kind: 'edit',
-      edit: { framework, file: target.file, original, content: result.content, inserted: result.inserted },
-    };
+    return { kind: 'edit', edit: { framework, file, original, content: result.content, inserted: result.inserted } };
   } catch (error) {
     return { kind: 'fallback', reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** Inner JS of the fetched `<script>…</script>` snippet. */
+function snippetBody(snippetHtml: string): string | undefined {
+  const match = /^\s*<script[^>]*>\s*([\s\S]*?)\s*<\/script>\s*$/i.exec(snippetHtml);
+  return match?.[1] || undefined;
 }
 
 export function applyStaticEdit(dir: string, edit: StaticEdit): { ok: true } | { ok: false; reason: string } {
@@ -102,11 +104,11 @@ export async function runStaticInstall(
     return { status: 'fallback', reason: plan.reason, framework: plan.framework };
   }
 
-  p.log.step(`${pc.bold('Step 1 of 2')} · Install the capture snippet`);
+  p.log.step(pc.bold('Install the capture snippet'));
 
   if (plan.kind === 'already-installed') {
     onEvent('static_install_already_installed', { file: plan.file });
-    p.log.success(`The capture snippet is already installed (${pc.cyan(plan.file)}).`);
+    p.log.success(pc.green(pc.bold(`✔ Snippet already installed in ${plan.file}`)));
     return { status: 'already-installed', file: plan.file };
   }
 
@@ -137,15 +139,17 @@ export async function runStaticInstall(
   }
 
   onEvent('static_install_completed', { framework: edit.framework, file: edit.file });
-  p.log.success(`Added the capture snippet to ${pc.cyan(edit.file)}.`);
+  p.log.success(pc.green(pc.bold(`✔ Snippet installed in ${edit.file}`)));
   return { status: 'installed', framework: edit.framework, file: edit.file };
 }
 
-// The snippet is a few kB of minified JS; show its shape, not all of it.
+// The snippet is a few kB of minified JS nobody needs to read to decide;
+// enough lines to show where it goes and what it is.
 function previewLines(text: string): string {
   const lines = text.replace(/\n+$/, '').split('\n');
-  const clipped = lines.map((line) => (line.length > 100 ? `${line.slice(0, 99)}…` : line));
-  const shown =
-    clipped.length > 14 ? [...clipped.slice(0, 6), pc.dim(`… ${clipped.length - 10} more lines`), ...clipped.slice(-4)] : clipped;
-  return shown.map((line) => pc.green(`+ ${line}`)).join('\n');
+  const shown = lines
+    .slice(0, 3)
+    .map((line) => pc.green(`+ ${line.length > 80 ? `${line.slice(0, 79)}…` : line}`));
+  if (lines.length > 3) shown.push(pc.dim(`  (+${lines.length - 3} more lines, Fullstory capture snippet)`));
+  return shown.join('\n');
 }

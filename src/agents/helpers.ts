@@ -109,6 +109,9 @@ export function runTerminalAgent(opts: {
   /** 'inherit' streams the agent's own output; 'pipe' lets the caller parse it. */
   stdout?: 'inherit' | 'pipe';
   onStdoutLine?: (line: string) => void;
+  /** Capture stderr instead of letting it hit the terminal (where it would
+   * tear through a spinner). */
+  onStderr?: (chunk: string) => void;
 }): Promise<number> {
   return new Promise((resolve, reject) => {
     const child = spawn(opts.binaryPath, opts.args, {
@@ -116,7 +119,7 @@ export function runTerminalAgent(opts: {
       stdio: [
         opts.promptOnStdin !== undefined ? 'pipe' : 'inherit',
         opts.stdout ?? 'inherit',
-        'inherit',
+        opts.onStderr ? 'pipe' : 'inherit',
       ],
     });
 
@@ -146,6 +149,11 @@ export function runTerminalAgent(opts: {
         if (buffer) opts.onStdoutLine!(buffer);
         buffer = '';
       });
+    }
+
+    if (opts.onStderr && child.stderr) {
+      child.stderr.setEncoding('utf8');
+      child.stderr.on('data', opts.onStderr);
     }
 
     child.on('error', reject);

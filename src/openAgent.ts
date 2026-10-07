@@ -128,6 +128,8 @@ export async function offerCopyAndOpen(opts: {
   label: string;
   /** Trailing hint on paste messages, e.g. "after you've clicked around". */
   readyHint: string;
+  /** Dim aside on the confirm itself, e.g. when to answer it. */
+  confirmHint?: string;
   onEvent: (event: string, properties?: Record<string, unknown>) => void;
   copiedEvent: string;
   openedEvent: string;
@@ -139,18 +141,19 @@ export async function offerCopyAndOpen(opts: {
   // the copy-only offer (which warns) so copying stays a deliberate choice.
   const canOpen = target != null && canOpenAgent(target) && !clipboardBusy;
   const clip = clipboardBusy ? ` ${pc.dim("(replaces what's on your clipboard now)")}` : '';
+  const hint = opts.confirmHint ? ` ${pc.dim(`(${opts.confirmHint})`)}` : '';
 
   const answer = await p.confirm({
     message: canOpen
-      ? `Open ${agentName} and copy the ${label} to your clipboard?${clip}`
-      : `Copy the ${label} above to your clipboard?${clip}`,
+      ? `Open ${agentName} and copy the ${label}?${hint}${clip}`
+      : `Copy the ${label} to your clipboard?${hint}${clip}`,
   });
   if (p.isCancel(answer) || !answer) return;
 
   try {
     await clipboard.write(prompt);
   } catch {
-    p.log.warn('Could not write to the clipboard — copy the prompt above.');
+    p.log.warn('Could not write to the clipboard. Copy the prompt above.');
     return;
   }
   onEvent(opts.copiedEvent);
@@ -160,14 +163,14 @@ export async function offerCopyAndOpen(opts: {
       onEvent(opts.openedEvent, { kind: target.kind });
       p.log.success(
         target.kind === 'terminal'
-          ? `Opened a new Terminal window running ${agentName} in ${target.dir} — paste the ${label} ${readyHint}.`
-          : `${agentName} is opening — paste the ${label} ${readyHint}.`,
+          ? `Opened ${agentName} in a new window (${label} copied)`
+          : `${agentName} is opening (${label} copied)`,
       );
       return;
     }
-    p.log.success(`${capitalize(label)} copied — open ${agentName} and paste it ${readyHint}.`);
+    p.log.success(`${capitalize(label)} copied. Open ${agentName} and paste it ${readyHint}.`);
     return;
   }
 
-  p.log.success(`${capitalize(label)} copied — paste it into ${agentName} ${readyHint}.`);
+  p.log.success(`${capitalize(label)} copied. Paste it into ${agentName} ${readyHint}.`);
 }

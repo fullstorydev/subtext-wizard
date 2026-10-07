@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import * as p from '@clack/prompts';
 import type { SubtextAuth } from './auth.js';
 import {
   SNIPPET_PATH,
@@ -27,15 +26,11 @@ export async function fetchCaptureSnippet(
   auth: SubtextAuth,
   options: WizardOptions,
 ): Promise<string> {
-  const spinner = p.spinner();
-  spinner.start('Fetching your org’s capture snippet…');
-
   if (options.mock) {
     const snippet = fs.readFileSync(
       packageRootPath('templates', 'mock-snippet.html'),
       'utf8',
     );
-    spinner.stop(`Got capture snippet for org ${auth.orgId} (mock).`);
     return snippet.trim();
   }
 
@@ -64,10 +59,8 @@ export async function fetchCaptureSnippet(
     if (body.includes('`') || /<\/script/i.test(body)) {
       throw new Error('snippet contains unexpected characters (backtick or </script>)');
     }
-    spinner.stop(`Got capture snippet for org ${auth.orgId}.`);
     return `<script>\n${body}\n</script>`;
   } catch (error) {
-    spinner.stop('Could not fetch your capture snippet.', 1);
     throw new Error(
       `Failed to fetch the capture snippet from ${url.origin}${url.pathname}: ${
         error instanceof Error ? error.message : String(error)

@@ -50,16 +50,21 @@ export interface SubtextAuth {
  * The access token is `<realm>.oauth!<JWT>`; the JWT payload carries
  * `org_id` and `sub` (user email), so no extra "who am I" call is needed.
  */
+/** The one status line every login path ends on. */
+function signedInMessage(email: string | undefined, orgId: string): string {
+  return `Signed in${email ? ` as ${email}` : ''} (${orgId})`;
+}
+
 export async function authenticate(
   options: WizardOptions,
   openBrowser = true,
 ): Promise<SubtextAuth> {
   if (options.apiKey) {
-    p.log.info('Using the credential you provided — skipping browser login.');
     // An OAuth access token carries org_id in its JWT, so we can use it as-is.
     // A normal API key is opaque and needs a /me lookup to resolve its org.
     const claims = decodeTokenClaims(options.apiKey);
     if (claims?.orgId) {
+      p.log.step(signedInMessage(claims.userEmail, claims.orgId));
       return {
         accessToken: options.apiKey,
         authScheme: 'Bearer',
@@ -85,7 +90,7 @@ export async function authenticate(
     const spinner = p.spinner();
     spinner.start('Waiting for browser login (mock)');
     await new Promise((resolve) => setTimeout(resolve, 1_500));
-    spinner.stop('Logged in as demo@example.com (mock)');
+    spinner.stop(signedInMessage('demo@example.com', 'o-1G1-na1 (mock)'));
     return {
       accessToken: 'subtext_mock_token',
       authScheme: 'Bearer',
@@ -169,9 +174,7 @@ export async function authenticate(
     throw new Error('Could not read the org id from the access token.');
   }
 
-  spinner.stop(
-    `Logged in${claims.userEmail ? ` as ${claims.userEmail}` : ''} (org ${claims.orgId}).`,
-  );
+  spinner.stop(signedInMessage(claims.userEmail, claims.orgId));
 
   return {
     accessToken: token.access_token,
@@ -248,7 +251,7 @@ async function resolveApiKey(apiKey: string, options: WizardOptions): Promise<Su
 
   // The org id is authoritative for the realm: EU orgs carry the -eu1 suffix.
   const resolvedRegion: Region = body.orgId.endsWith('-eu1') ? 'eu' : region;
-  spinner.stop(`API key valid${body.email ? ` for ${body.email}` : ''} (org ${body.orgId}).`);
+  spinner.stop(signedInMessage(body.email, body.orgId));
 
   return {
     accessToken: apiKey,

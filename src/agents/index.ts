@@ -73,7 +73,7 @@ export async function chooseAgent(
   if (choice === MANUAL_CHOICE) return MANUAL_CHOICE;
 
   const chosen = detected.find((d) => d.definition.id === choice)!;
-  if (chosen.detail) {
+  if (chosen.detail && options.debug) {
     p.log.info(pc.dim(`Using ${chosen.definition.name} at ${chosen.detail}`));
   }
   return chosen;

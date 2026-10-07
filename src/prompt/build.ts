@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { TELEMETRY_MARKER_PREFIX } from '../agents/telemetry-marker.js';
+import { EXTRAS_REPORT, EXTRAS_RESULT, SETUP_REPORT } from '../extras.js';
 import type { IntegrationSelection } from '../integrations.js';
 import { packageRootPath } from '../paths.js';
 
@@ -41,6 +42,8 @@ export interface SnippetPromptInput extends SharedPromptInput {
 
 export interface EnrichPromptInput extends SharedPromptInput {
   selection: IntegrationSelection;
+  /** Auth libraries the wizard found in package.json; empty narrows Step 4. */
+  authLibraries?: string[];
 }
 
 const TITLE_LINE: Record<PromptPhase, string> = {
@@ -53,14 +56,56 @@ const TITLE_LINE: Record<PromptPhase, string> = {
 // overwrite the phase-1 (snippet) install report — both headless runs write in
 // the same directory, and the outro points the user at these files.
 const REPORT_FILE: Record<PromptPhase, string> = {
-  snippet: 'subtext-setup-report.md',
-  enrich: 'subtext-enrich-report.md',
+  snippet: SETUP_REPORT,
+  enrich: EXTRAS_REPORT,
 };
 
 function headlessModeSection(reportFile: string): string {
   return `## Mode: autonomous (headless)
 
-You are running non-interactively inside the Subtext setup CLI. The user cannot answer questions mid-run. Wherever this document says to present a plan, wait for approval, or confirm before writing: do NOT wait — apply your best judgment, keep every change minimal and reviewable, and record what you did (plus anything you would have asked) in a final report written to \`./${reportFile}\`. If a step is impossible without user input, skip it and explain why in the report.`;
+You are running non-interactively inside the Subtext setup CLI. The user cannot answer questions mid-run. Wherever this document says to present a plan, wait for approval, or confirm before writing: do NOT wait — apply your best judgment, keep every change minimal and reviewable, and record what you did (plus anything you would have asked) in a final report written to \`./${reportFile}\` (create the directory if needed). If a step is impossible without user input, skip it and explain why in the report.
+
+### Terminal output
+
+The setup CLI shows your progress and prints its own summary, so keep what you say short:
+
+- Your final message must be one or two plain-text sentences. No markdown: no headings, bold, bullet lists, or backticks.
+- Do not mention MCP servers, connectors, or tools you didn't use, or any authentication state of them.
+- Notes meant for the Subtext team (documentation gaps, missing examples) go in the report only, never in your messages.`;
+}
+
+/** Headless extras runs end with a machine-readable result the CLI summarizes. */
+const EXTRAS_RESULT_SECTION = `### Result file
+
+As your very last action, write \`./${EXTRAS_RESULT}\` with exactly this shape:
+
+\`\`\`json
+{
+  "identity": { "status": "done", "detail": "setIdentity in app/providers.tsx" },
+  "analytics": { "status": "skipped", "detail": "no analytics SDK installed" },
+  "masking": { "status": "done", "detail": "4 fields masked" },
+  "files_changed": ["app/providers.tsx"]
+}
+\`\`\`
+
+\`status\` is \`done\`, \`skipped\`, or \`failed\`. \`detail\` is a short plain-text phrase (under 80 characters) saying what you did or why you skipped it. \`files_changed\` lists project-relative paths you modified, excluding the report and this file. Write it even if you changed nothing.`;
+
+function scopeSection(input: EnrichPromptInput): string {
+  const lines: string[] = [];
+  if (input.authLibraries !== undefined) {
+    lines.push(
+      input.authLibraries.length > 0
+        ? `- Auth: the CLI found ${input.authLibraries.join(', ')} in \`package.json\`. Start Step 4 from there.`
+        : '- Auth: the CLI found no known auth library in `package.json`. In Step 4, check briefly for a custom auth flow (a user context, session cookie, or JWT decode). If there is no clear signed-in user object, skip Step 4 and record it as skipped. Never invent one.',
+    );
+  }
+  const { integrations, other } = input.selection;
+  if (integrations.length === 0 && other.length === 0) {
+    lines.push(
+      '- Analytics: no analytics SDK was found in `package.json` and the user named none. Do one quick check for a script-tag install; if there is none, skip Step 5 and record it as skipped.',
+    );
+  }
+  return lines.length > 0 ? ['## Scope', '', 'The CLI already checked the project. Use this to keep the pass short:', '', ...lines].join('\n') : '';
 }
 
 const INTERACTIVE_MODE_SECTION = `## Mode: interactive
@@ -178,11 +223,8 @@ function telemetrySection(phase: PromptPhase, telemetry: PromptTelemetry): strin
 
 function integrationsSection(selection: IntegrationSelection): string {
   const { integrations, other } = selection;
-  if (integrations.length === 0 && other.length === 0) {
-    return `## Target integrations
-
-The user did not name any analytics or product tools. Detect whatever is present using your own search of \`package.json\` and the codebase, and link the Subtext URL into anything you find in Step 5.`;
-  }
+  // The Scope section covers the nothing-found case.
+  if (integrations.length === 0 && other.length === 0) return '';
 
   const lines: string[] = [
     '## Target integrations',
@@ -279,9 +321,11 @@ export function buildEnrichPrompt(input: EnrichPromptInput): string {
   const headless = input.mode === 'headless';
   return renderPrompt('enrich', {
     TITLE_LINE: TITLE_LINE.enrich,
-    MODE_SECTION: headless ? headlessModeSection(REPORT_FILE.enrich) : INTERACTIVE_MODE_SECTION,
+    MODE_SECTION: headless
+      ? `${headlessModeSection(REPORT_FILE.enrich)}\n\n${EXTRAS_RESULT_SECTION}`
+      : INTERACTIVE_MODE_SECTION,
     TELEMETRY_SECTION: telemetrySection('enrich', input.telemetry),
-    INTEGRATIONS_SECTION: integrationsSection(input.selection),
+    INTEGRATIONS_SECTION: [scopeSection(input), integrationsSection(input.selection)].filter(Boolean).join('\n\n'),
     INTEGRATION_LINKAGE_EXAMPLES: linkageExamples(input.selection),
     ...gates(headless),
   });
