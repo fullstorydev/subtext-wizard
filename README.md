@@ -50,6 +50,8 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
                         windsurf, vscode, zed, claude-desktop, manual)
 --integrations <list>   Comma-separated tools to target, skips the picker
 --print-prompt          Print the install prompt instead of launching an agent
+--headless              No prompts, for automation: configure the codebase only
+                        (needs --api-key or SUBTEXT_API_KEY). See below.
 --no-telemetry          Opt out of telemetry. Anonymous install telemetry (step
                         progress, outcomes, timings, and agent token usage;
                         never your code or data) is on by default — this flag,
@@ -57,6 +59,19 @@ When it finishes, your agent is connected to your sessions. See the [Subtext rep
 --debug                 Verbose output
 --help                  Show all options
 ```
+
+## Headless mode
+
+`--headless` configures a repo with no human input, for automated setups such as a CI job or a hosted GitHub integration:
+
+```
+SUBTEXT_API_KEY=... npx @subtextdev/subtext-wizard --headless --dir path/to/app
+```
+
+1. Installs the capture snippet. Recognized frameworks are edited directly; anything else (or a project with a Content-Security-Policy) goes to a terminal coding agent.
+2. Runs the extras pass with that agent: user identification, analytics linkage for SDKs found in `package.json` (or `--integrations`), and privacy masking.
+
+It uses `--agent` if given, otherwise the first of Claude Code, Codex CLI, or Gemini CLI on the machine; the agent needs its own credentials (e.g. `ANTHROPIC_API_KEY`). With no agent, only the direct snippet install runs. There's no browser login, plugin setup, demo, or clipboard. The outcome is written to `.subtext/install-result.json`, and the exit code is `0` when the snippet is installed, `1` when it isn't, and `2` when no credential was given.
 
 ## Development
 

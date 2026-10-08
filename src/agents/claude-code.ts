@@ -92,7 +92,8 @@ function relativeTo(cwd: string, file: string): string {
 async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   // --debug keeps the old streamed view (every tool call and message); the
   // default is one spinner line naming what the agent is doing right now.
-  const verbose = ctx.debug;
+  // Without a TTY (CI, the GitHub integration) a spinner can't redraw, so log lines instead.
+  const verbose = ctx.debug || !process.stdout.isTTY;
   const spinner = verbose ? undefined : p.spinner();
   if (verbose) {
     p.log.step('Running with Claude Code (headless)…');

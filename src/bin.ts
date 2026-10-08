@@ -7,6 +7,7 @@ import {
   warnOnDevOverrides,
   type WizardOptions,
 } from './config.js';
+import { runHeadless } from './headless.js';
 import { runWizard } from './run.js';
 
 const HELP = `
@@ -39,6 +40,21 @@ Options:
                           use). The agent runs autonomously against --dir with
                           edits — and, depending on the agent, command execution —
                           auto-approved. Only pass this in a trusted directory.
+  --headless              Configure the codebase with no human input, for
+                          automation: installs the snippet (and CSP), then
+                          identity, analytics linkage, and privacy masking via
+                          a terminal agent (claude-code, codex, gemini) if one
+                          is installed. Requires --api-key or SUBTEXT_API_KEY.
+                          Skips login, plugin setup, and the demo. Writes
+                          .subtext/install-result.json; exits 0 when the
+                          snippet is installed.
+  --org <id>              With --headless: use this org's snippet without a
+                          credential (the snippet service is public). Skips
+                          telemetry.
+  --external-agent        With --headless: do the deterministic steps, then
+                          write the rest to .subtext/agent-prompt.md for an
+                          agent that is already running (instead of launching
+                          a local agent CLI).
   --mock                  No real network calls (placeholder auth + snippet)
   --no-telemetry          Opt out of telemetry. Anonymous install telemetry
                           (step progress, outcomes, timings, and agent token
@@ -66,6 +82,9 @@ function main(): void {
         integrations: { type: 'string' },
         'print-prompt': { type: 'boolean', default: false },
         yes: { type: 'boolean', default: false },
+        headless: { type: 'boolean', default: false },
+        org: { type: 'string' },
+        'external-agent': { type: 'boolean', default: false },
         mock: { type: 'boolean', default: false },
         'no-telemetry': { type: 'boolean', default: false },
         debug: { type: 'boolean', default: false },
@@ -119,7 +138,10 @@ function main(): void {
       .map((s) => s.trim())
       .filter(Boolean),
     printPrompt: values['print-prompt'] ?? false,
-    yes: values.yes ?? false,
+    yes: (values.yes ?? false) || (values.headless ?? false),
+    headless: values.headless ?? false,
+    org: values.org,
+    externalAgent: values['external-agent'] ?? false,
     mock,
     // Telemetry is on by default; both the explicit --no-telemetry flag and the
     // standard DO_NOT_TRACK / DISABLE_TELEMETRY env vars opt out. The env-var
@@ -128,7 +150,12 @@ function main(): void {
     debug: values.debug ?? false,
   };
 
-  runWizard(options)
+  if ((options.org || options.externalAgent) && !options.headless) {
+    console.error('--org and --external-agent only work with --headless.');
+    process.exit(2);
+  }
+
+  (options.headless ? runHeadless(options) : runWizard(options))
     .then((code) => process.exit(code))
     .catch((error) => {
       console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
