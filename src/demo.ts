@@ -35,6 +35,8 @@ export interface DemoGuideContext {
    * install-success marker. The guide then leads with "once the install
    * finishes" instead of presenting the snippet as already live. */
   installPending: boolean;
+  /** Mobile apps need a native rebuild and a simulator or device, not a dev server restart. */
+  mobile?: boolean;
   /** Manual and GUI handoff paths: the install prompt currently occupies the
    * clipboard, so copying the demo prompt now would clobber it. Warn in the
    * confirm. */
@@ -52,8 +54,9 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
   // bodies, readableNoteBody undoes that); everything around it stays quiet.
   const steps = [
     ...(ctx.installPending ? [`Let ${ctx.agentName} finish the install`] : []),
-    'Restart your dev server',
-    'Open the app and click around for a minute or two',
+    ...(ctx.mobile
+      ? ['Rebuild the app and launch it on a simulator or device', 'Tap around the app for a minute or two']
+      : ['Restart your dev server', 'Open the app and click around for a minute or two']),
     `Paste the demo prompt into ${ctx.agentName}`,
   ].map((step, i) => `${i + 1}. ${pc.bold(step)}`);
   steps.push(pc.dim('   (approve the Subtext sign-in when asked)'));
@@ -78,7 +81,9 @@ export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
     readyHint: "after you've clicked around",
     // Opening the agent before there's a captured session makes the first
     // review come up empty, so the confirm doubles as the "I'm ready" pause.
-    confirmHint: "press Enter once you've restarted and clicked around",
+    confirmHint: ctx.mobile
+      ? "press Enter once you've rebuilt and tapped around"
+      : "press Enter once you've restarted and clicked around",
     onEvent: ctx.onEvent,
     copiedEvent: 'demo_prompt_copied',
     openedEvent: 'demo_agent_opened',

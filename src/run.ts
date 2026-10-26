@@ -37,8 +37,9 @@ import {
   type ExtrasResults,
   type ExtrasScope,
 } from './extras.js';
+import { detectPlatform, isMobile, mobileCaptureConfig, PLATFORM_LABEL } from './platform.js';
 import { fetchCaptureSnippet } from './snippet.js';
-import { runStaticInstall } from './staticInstall/index.js';
+import { runStaticInstall, type StaticOutcome } from './staticInstall/index.js';
 import { Telemetry } from './telemetry.js';
 
 export async function runWizard(options: WizardOptions): Promise<number> {
@@ -82,9 +83,18 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const auth = await authenticate(options, openInBrowser);
     telemetry.note('auth_completed', { via: options.apiKey ? 'api_key' : 'browser' });
 
-    // 2. Org-specific capture snippet.
-    const snippet = await fetchCaptureSnippet(auth, options);
-    telemetry.note('snippet_fetched');
+    // 2. Org-specific capture snippet. Mobile apps use the native SDK, which
+    //    only needs the org id and server URL, so there's nothing to fetch.
+    const platform = detectPlatform(options.dir);
+    const mobile = isMobile(platform) ? mobileCaptureConfig(platform, auth.orgId, auth.region) : undefined;
+    let snippet = '';
+    if (mobile) {
+      p.log.info(`Detected a ${PLATFORM_LABEL[platform]} app. Your coding agent will set up Fullstory's native mobile SDK.`);
+      telemetry.note('platform_detected', { platform });
+    } else {
+      snippet = await fetchCaptureSnippet(auth, options);
+      telemetry.note('snippet_fetched');
+    }
 
     // Telemetry is ON by default — announce it (no prompt) and point at the
     // opt-out. The notice names agent token usage explicitly, since the funnel
@@ -117,7 +127,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // Common frameworks get the snippet written by the wizard itself, which is
     // faster and deterministic. Anything it can't place with certainty (or a
     // declined/failed edit) falls through to the agent-driven install below.
-    const staticInstall = await runStaticInstall(snippet, options, onEvent);
+    const staticInstall: StaticOutcome = mobile
+      ? { status: 'fallback', reason: `${PLATFORM_LABEL[platform]} needs the native SDK`, framework: PLATFORM_LABEL[platform] }
+      : await runStaticInstall(snippet, options, onEvent);
     const snippetInstalled = staticInstall.status !== 'fallback';
 
     // 3. Find the user's coding agents and pick one. We never bring our own
@@ -176,7 +188,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
             : 'none';
     const promptMode: PromptMode = isTerminalRun ? 'headless' : 'interactive';
 
-    const snippetPrompt = buildSnippetPrompt({ snippet, mode: promptMode, telemetry: promptTelemetry });
+    const snippetPrompt = buildSnippetPrompt(
+      mobile
+        ? { mobile, mode: promptMode, telemetry: promptTelemetry }
+        : { snippet, mode: promptMode, telemetry: promptTelemetry },
+    );
     if (!snippetInstalled) printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
 
     // For terminal agents the install runs autonomously; name what it
@@ -276,7 +292,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       } catch (error) {
         if (!(error instanceof CancelledError)) throw error;
       }
-      const scope = { selection, authLibraries: detectAuthLibraries(options.dir) };
+      // The auth catalog is npm-only, so a Flutter app gets no auth hint rather than a false "none found".
+      const scope = {
+        selection,
+        authLibraries: platform === 'flutter' ? undefined : detectAuthLibraries(options.dir),
+        platform,
+      };
       showExtrasPlan(scope);
       return scope;
     };
@@ -312,6 +333,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         agentName: 'your coding agent',
         installPending: !snippetInstalled,
         clipboardHoldsInstallPrompt: copied,
+        mobile: Boolean(mobile),
         yes: options.yes,
         onEvent,
       });
@@ -330,7 +352,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
-      p.outro(snippetInstalled ? DEPLOY_OUTRO : 'Run this installer again any time with: npx @subtextdev/subtext-wizard');
+      p.outro(snippetInstalled ? deployOutro(Boolean(mobile)) : 'Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
       return 0;
     }
@@ -375,6 +397,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         agentName: chosen.definition.name,
         installPending: !snippetInstalled,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
+        mobile: Boolean(mobile),
         yes: options.yes,
         // Suppressed under --print-prompt so the demo's "Open agent?" offer
         // can't launch the app during a dry run.
@@ -399,7 +422,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       }
       p.outro(
         snippetInstalled
-          ? DEPLOY_OUTRO
+          ? deployOutro(Boolean(mobile))
           : 'Finish the install in your agent — it will guide you from here.',
       );
       await telemetry.flush();
@@ -501,6 +524,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       // Exit 0 without the agent's install marker means the install may have
       // been refused or abandoned — frame the guide as post-install work.
       installPending: !installConfirmed,
+      mobile: Boolean(mobile),
       yes: options.yes,
       // Suppressed under --print-prompt so the demo's "Open agent?" offer can't
       // spawn the agent during a dry run.
@@ -562,7 +586,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     telemetry.step('complete', installConfirmed ? 'success' : 'partial', {
       harness: chosen.definition.id,
     });
-    p.outro(terminalOutro(options.dir, !snippetInstalled, extrasRan, extras));
+    p.outro(terminalOutro(options.dir, !snippetInstalled, extrasRan, extras, Boolean(mobile)));
     await telemetry.flush();
     return 0;
   } catch (error) {
@@ -593,7 +617,10 @@ function tildify(dir: string): string {
   return dir === home || dir.startsWith(home + '/') ? `~${dir.slice(home.length)}` : dir;
 }
 
-const DEPLOY_OUTRO = 'Subtext capture is installed. Deploy to start capturing real user sessions.';
+const shipVerb = (mobile: boolean) => (mobile ? 'Ship a new build of your app' : 'Deploy');
+
+const deployOutro = (mobile: boolean) =>
+  `Subtext capture is installed. ${shipVerb(mobile)} to start capturing real user sessions.`;
 
 /** The closing line, matched to what actually happened in the run. */
 function terminalOutro(
@@ -601,14 +628,15 @@ function terminalOutro(
   agentInstalledSnippet: boolean,
   extrasRan: boolean,
   extras: ExtrasResults | undefined,
+  mobile: boolean,
 ): string {
   // Only point at reports this run could have written.
   const candidates = [...(extrasRan ? [EXTRAS_REPORT] : []), ...(agentInstalledSnippet ? [SETUP_REPORT] : [])];
   const report = candidates.find((f) => fs.existsSync(path.join(dir, f)));
   const details = report ? `\nDetails in ${report}` : '';
-  if (!extrasRan) return `${DEPLOY_OUTRO}${details}`;
+  if (!extrasRan) return `${deployOutro(mobile)}${details}`;
   if (extras && extras.filesChanged.length === 0) {
-    return `No other code changes were needed. Deploy to start capturing real user sessions.${details}`;
+    return `No other code changes were needed. ${shipVerb(mobile)} to start capturing real user sessions.${details}`;
   }
-  return `Review the changes, then deploy to start capturing real user sessions.${details}`;
+  return `Review the changes, then ${shipVerb(mobile).toLowerCase()} to start capturing real user sessions.${details}`;
 }

@@ -2,7 +2,7 @@
 
 The Subtext capture snippet should already be installed from the earlier snippet step. Confirm it before doing anything else:
 
-- Read `package.json` for `@fullstory/browser`, `@fullstory/react-native`, or `@fullstory/snippet`, or find the snippet's script tag / `init({ orgId })` call in the entry point.
+- Read `package.json` for `@fullstory/browser` or `@fullstory/snippet`, or find the snippet's script tag / `init({ orgId })` call in the entry point.
 
 If you cannot find the snippet, stop and tell the user to run the Subtext snippet install first — do not proceed with the steps below.
 
