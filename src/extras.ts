@@ -4,6 +4,7 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { sanitizeTerminalOutput } from './agents/helpers.js';
 import type { IntegrationSelection } from './integrations.js';
+import type { Platform } from './platform.js';
 import { readableNoteBody } from './logo.js';
 
 /**
@@ -54,7 +55,9 @@ export function detectAuthLibraries(dir: string): string[] {
 
 export interface ExtrasScope {
   selection: IntegrationSelection;
-  authLibraries: string[];
+  /** undefined when the project isn't npm-based, so there was nothing to check. */
+  authLibraries: string[] | undefined;
+  platform?: Platform;
 }
 
 /** One box saying what the pass will do, shown before asking to run it. */
@@ -63,9 +66,11 @@ export function showExtrasPlan(scope: ExtrasScope): void {
   const rows = [
     row(
       'Identity',
-      scope.authLibraries.length > 0
+      scope.authLibraries?.length
         ? `tie sessions to signed-in users (${scope.authLibraries.join(', ')})`
-        : 'no auth library found; only added if there is a clear signed-in user',
+        : scope.authLibraries
+          ? 'no auth library found; only added if there is a clear signed-in user'
+          : 'tie sessions to signed-in users',
     ),
     row('Analytics', tools.length > 0 ? `link session URLs into ${tools.join(', ')}` : 'none found, skipped'),
     row('Masking', 'tag fields that show personal data'),

@@ -4,7 +4,7 @@ Determine whether the capture snippet is *actually* installed. The snippet is th
 
 Run these checks in order. Stop at the first positive match.
 
-1. Package dependencies (highest confidence) — Read `package.json`. Look for `@fullstory/browser`, `@fullstory/react-native`, or `@fullstory/snippet` in `dependencies` or `devDependencies`.
+1. Package dependencies (highest confidence) — Read `package.json`. Look for `@fullstory/browser` or `@fullstory/snippet` in `dependencies` or `devDependencies`.
 2. Script tag in HTML entry point — Search ONLY the HTML entry point (`index.html`, `app/layout.tsx`, `pages/_document.tsx`, or framework equivalent) for the literal strings `fullstory.com/s/fs.js` or `_fs_script`. Do not search other files.
 3. SDK initialization call — Grep for `init\(\s*\{\s*orgId`, `window\['_fs_org'\]\s*=`, or `window\._fs_org\s*=` in `.ts`, `.tsx`, `.js`, `.jsx` files (exclude `node_modules`, test files, and `*.d.ts`). The `init()` call comes from `@fullstory/browser` v2: `import { init } from '@fullstory/browser'`.
 
@@ -34,7 +34,6 @@ Read `package.json` and project structure to detect the framework:
 - `@remix-run/*` in dependencies → Remix → `app/root.tsx`
 - `vite` in devDependencies → Vite → `index.html`
 - `react-scripts` in dependencies → Create React App → `public/index.html`
-- `react-native` in dependencies → React Native → App entry point
 - None of the above → Plain HTML → `index.html` (search for `<head>` if missing)
 
 If nothing matches and no `index.html` exists, search `.html`, `.tsx`, `.jsx` files for `<head>` tags, present the candidates, and ask me which file to use.
@@ -78,7 +77,6 @@ This is the snippet to install. It is specific to this organization — install 
 - Next.js (Pages Router) — Add to `pages/_document.tsx` inside `<Head>`.
 - Remix — Add to `app/root.tsx` inside `<head>` of the root layout.
 - Vite / CRA / Plain HTML — Add the `<script>` tag to `index.html` inside `<head>`.
-- React Native — Install `@fullstory/react-native`, then add `init({ orgId: '<ORG_ID>' })` to the app entry point.
 
 ## Step 5: Explain
 

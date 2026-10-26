@@ -9,6 +9,8 @@ export interface Integration {
   label: string;
   /** npm packages whose presence indicates the tool is installed. */
   packages: string[];
+  /** pub.dev packages, for Flutter apps. */
+  pubPackages?: string[];
   /** window globals for script-tag installs (no npm package). */
   globals?: string[];
   /** Step 6 example: attach the Subtext URL to this tool's user metadata. */
@@ -19,7 +21,8 @@ export const INTEGRATIONS: Integration[] = [
   {
     id: 'posthog',
     label: 'PostHog',
-    packages: ['posthog-js', 'posthog-js-lite'],
+    packages: ['posthog-js', 'posthog-js-lite', 'posthog-react-native'],
+    pubPackages: ['posthog_flutter'],
     globals: ['posthog'],
     linkageExample: `// PostHog
 posthog.identify(user.id, { subtext_url: subtextUrl });`,
@@ -27,7 +30,8 @@ posthog.identify(user.id, { subtext_url: subtextUrl });`,
   {
     id: 'amplitude',
     label: 'Amplitude',
-    packages: ['@amplitude/analytics-browser', 'amplitude-js'],
+    packages: ['@amplitude/analytics-browser', 'amplitude-js', '@amplitude/analytics-react-native'],
+    pubPackages: ['amplitude_flutter'],
     globals: ['amplitude'],
     linkageExample: `// Amplitude
 const identifyEvent = new amplitude.Identify().set('subtext_url', subtextUrl);
@@ -36,7 +40,8 @@ amplitude.identify(identifyEvent);`,
   {
     id: 'mixpanel',
     label: 'Mixpanel',
-    packages: ['mixpanel-browser'],
+    packages: ['mixpanel-browser', 'mixpanel-react-native'],
+    pubPackages: ['mixpanel_flutter'],
     globals: ['mixpanel'],
     linkageExample: `// Mixpanel
 mixpanel.people.set({ subtext_url: subtextUrl });`,
@@ -51,7 +56,8 @@ statsigClient.updateUserSync({ ...statsigUser, custom: { ...statsigUser.custom, 
   {
     id: 'sentry',
     label: 'Sentry',
-    packages: ['@sentry/browser', '@sentry/react', '@sentry/nextjs', '@sentry/vue', '@sentry/svelte'],
+    packages: ['@sentry/browser', '@sentry/react', '@sentry/nextjs', '@sentry/vue', '@sentry/svelte', '@sentry/react-native'],
+    pubPackages: ['sentry_flutter'],
     globals: ['Sentry'],
     linkageExample: `// Sentry — set as a tag so every captured error event carries the URL.
 // Tags are indexable and searchable in the Sentry UI; cap is 200 chars.
@@ -68,7 +74,8 @@ LogRocket.identify(user.id, { subtextUrl });`,
   {
     id: 'datadog',
     label: 'Datadog',
-    packages: ['@datadog/browser-rum', '@datadog/browser-logs'],
+    packages: ['@datadog/browser-rum', '@datadog/browser-logs', '@datadog/mobile-react-native'],
+    pubPackages: ['datadog_flutter_plugin'],
     globals: ['DD_RUM'],
     linkageExample: `// Datadog RUM
 datadogRum.setGlobalContextProperty('subtext_url', subtextUrl);`,
@@ -76,7 +83,8 @@ datadogRum.setGlobalContextProperty('subtext_url', subtextUrl);`,
   {
     id: 'launchdarkly',
     label: 'LaunchDarkly',
-    packages: ['launchdarkly-js-client-sdk', 'launchdarkly-react-client-sdk'],
+    packages: ['launchdarkly-js-client-sdk', 'launchdarkly-react-client-sdk', '@launchdarkly/react-native-client-sdk'],
+    pubPackages: ['launchdarkly_flutter_client_sdk'],
     linkageExample: `// LaunchDarkly — add to the context used when identifying
 ldClient.identify({ ...context, subtextUrl });`,
   },
@@ -90,7 +98,8 @@ growthbook.setAttributes({ ...growthbook.getAttributes(), subtext_url: subtextUr
   {
     id: 'intercom',
     label: 'Intercom',
-    packages: ['@intercom/messenger-js-sdk', 'react-use-intercom'],
+    packages: ['@intercom/messenger-js-sdk', 'react-use-intercom', '@intercom/intercom-react-native'],
+    pubPackages: ['intercom_flutter'],
     globals: ['Intercom'],
     linkageExample: `// Intercom
 Intercom('update', { subtext_url: subtextUrl });`,
@@ -130,7 +139,8 @@ Sprig('setAttributes', { subtext_url: subtextUrl });`,
   {
     id: 'segment',
     label: 'Segment',
-    packages: ['@segment/analytics-next', 'analytics-node'],
+    packages: ['@segment/analytics-next', 'analytics-node', '@segment/analytics-react-native'],
+    pubPackages: ['segment_analytics'],
     globals: ['analytics'],
     linkageExample: `// Segment
 analytics.identify(user.id, { subtextUrl });`,
@@ -154,6 +164,9 @@ export interface IntegrationSelection {
  * means "detected nothing".
  */
 export function detectInstalledIntegrations(dir: string): Integration[] {
+  const pub = pubspecPackages(dir);
+  if (pub) return INTEGRATIONS.filter((integration) => integration.pubPackages?.some((name) => pub.has(name)));
+
   let deps: Record<string, unknown> = {};
   try {
     const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')) as {
@@ -168,6 +181,33 @@ export function detectInstalledIntegrations(dir: string): Integration[] {
   return INTEGRATIONS.filter((integration) =>
     integration.packages.some((name) => installed.has(name)),
   );
+}
+
+/**
+ * Top-level package names in a Flutter app's pubspec.yaml, or undefined when
+ * there isn't one. A real YAML parser would be overkill: we only need the keys
+ * nested one level under `dependencies:`.
+ */
+function pubspecPackages(dir: string): Set<string> | undefined {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(dir, 'pubspec.yaml'), 'utf8');
+  } catch {
+    return undefined;
+  }
+  const names = new Set<string>();
+  let inDeps = false;
+  for (const line of text.split(/\r?\n/)) {
+    if (/^\S/.test(line)) inDeps = /^dependencies:\s*$/.test(line);
+    const match = inDeps && /^ {2}([a-z0-9_]+):/.exec(line);
+    if (match) names.add(match[1]);
+  }
+  return names;
+}
+
+/** Which manifest detection reads, for user-facing messages. */
+export function manifestName(dir: string): string {
+  return fs.existsSync(path.join(dir, 'pubspec.yaml')) ? 'pubspec.yaml' : 'package.json';
 }
 
 /**
@@ -199,7 +239,7 @@ export async function selectIntegrations(
   const detected = detectInstalledIntegrations(options.dir);
   if (detected.length > 0) {
     const names = detected.map((i) => brandPink(i.label)).join(', ');
-    p.log.success(`Found ${names} in package.json.`);
+    p.log.success(`Found ${names} in ${manifestName(options.dir)}.`);
     const addMore = await p.confirm({
       message: 'Add any other analytics or product tools to link?',
       initialValue: false,
@@ -214,7 +254,10 @@ export async function selectIntegrations(
   // Nothing in package.json: don't offer a catalog of tools the app doesn't
   // have. Script-tag installs are the one thing detection misses, so ask.
   const missed = await p.confirm({
-    message: 'No analytics SDKs found in package.json. Add one loaded another way (e.g. a script tag)?',
+    message:
+      manifestName(options.dir) === 'package.json'
+        ? 'No analytics SDKs found in package.json. Add one loaded another way (e.g. a script tag)?'
+        : 'No analytics SDKs found in pubspec.yaml. Add one anyway?',
     initialValue: false,
   });
   if (p.isCancel(missed)) throw new CancelledError();

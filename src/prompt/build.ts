@@ -3,6 +3,7 @@ import { TELEMETRY_MARKER_PREFIX } from '../agents/telemetry-marker.js';
 import { EXTRAS_REPORT, EXTRAS_RESULT, SETUP_REPORT } from '../extras.js';
 import type { IntegrationSelection } from '../integrations.js';
 import { packageRootPath } from '../paths.js';
+import type { MobileCaptureConfig, Platform } from '../platform.js';
 
 export type PromptMode = 'headless' | 'interactive';
 
@@ -35,15 +36,23 @@ interface SharedPromptInput {
   telemetry: PromptTelemetry;
 }
 
-export interface SnippetPromptInput extends SharedPromptInput {
-  /** Org-specific capture snippet HTML fetched from the API. */
-  snippet: string;
-}
+export type SnippetPromptInput = SharedPromptInput &
+  (
+    | {
+        /** Org-specific capture snippet HTML fetched from the API. */
+        snippet: string;
+      }
+    | {
+        /** Native SDK settings for a mobile app, which has no HTML snippet. */
+        mobile: MobileCaptureConfig;
+      }
+  );
 
 export interface EnrichPromptInput extends SharedPromptInput {
   selection: IntegrationSelection;
   /** Auth libraries the wizard found in package.json; empty narrows Step 4. */
   authLibraries?: string[];
+  platform?: Platform;
 }
 
 const TITLE_LINE: Record<PromptPhase, string> = {
@@ -102,7 +111,9 @@ function scopeSection(input: EnrichPromptInput): string {
   const { integrations, other } = input.selection;
   if (integrations.length === 0 && other.length === 0) {
     lines.push(
-      '- Analytics: no analytics SDK was found in `package.json` and the user named none. Do one quick check for a script-tag install; if there is none, skip Step 5 and record it as skipped.',
+      input.platform === undefined || input.platform === 'web'
+        ? '- Analytics: no analytics SDK was found in `package.json` and the user named none. Do one quick check for a script-tag install; if there is none, skip Step 5 and record it as skipped.'
+        : '- Analytics: no analytics SDK was found in the project manifest and the user named none. Skip Step 5 and record it as skipped.',
     );
   }
   return lines.length > 0 ? ['## Scope', '', 'The CLI already checked the project. Use this to keep the pass short:', '', ...lines].join('\n') : '';
@@ -121,9 +132,9 @@ Work through the steps with the user in this conversation, honoring every approv
  */
 const STEP_META: Record<string, string> = {
   precheck: '`already_installed` (bool)',
-  explore: '`framework` (string), `csp_present` (bool)',
+  explore: '`framework` (string), `csp_present` (bool, web only)',
   plan: '`approved` (bool)',
-  install: '`framework` (string), `csp_modified` (bool)',
+  install: '`framework` (string), `csp_modified` (bool, web only)',
   identify: '`identity_added` (bool)',
   link_analytics:
     '`analytics_providers` (string[] — names of every analytics/session-replay/error-monitoring/feature-flag SDK found)',
@@ -283,17 +294,30 @@ function gates(headless: boolean): Record<string, string> {
   };
 }
 
-const STEP_FILES: Record<PromptPhase, string> = {
-  snippet: 'install-steps-snippet.md',
-  enrich: 'install-steps-enrich.md',
-};
+const WEB_REFERENCE = `## Reference
 
-function renderPrompt(phase: PromptPhase, replacements: Record<string, string>): string {
+Fetch https://subtext.fullstory.com/llms.txt and use it as your SDK reference throughout this task. It indexes framework-specific install guides, API reference for \`setIdentity\` / \`setProperties\` / \`getSession\`, privacy classes, CSP directives, and analytics-tool linkage recipes. Pull the specific pages you need as you work each step below — do not try to memorize the whole index up front.`;
+
+// The Subtext llms.txt only covers the web snippet, so mobile agents get the
+// Fullstory mobile docs instead and the steps below link the exact pages.
+const MOBILE_REFERENCE = `## Reference
+
+Use Fullstory's mobile developer docs as your SDK reference: https://developer.fullstory.com/mobile/ and the help-center guides linked in the steps below. Fetch the specific pages you need as you work each step. Ignore Subtext and Fullstory docs for the web snippet; they don't apply to native apps.`;
+
+function stepFile(phase: PromptPhase, platform: Platform): string {
+  // Expo shares the React Native steps; they branch on managed vs. bare inside.
+  const suffix = platform === 'web' ? '' : platform === 'flutter' ? '-flutter' : '-react-native';
+  return `install-steps-${phase}${suffix}.md`;
+}
+
+function renderPrompt(phase: PromptPhase, platform: Platform, replacements: Record<string, string>): string {
   const shell = fs.readFileSync(packageRootPath('templates', 'install-prompt.md'), 'utf8');
-  const steps = fs.readFileSync(packageRootPath('templates', STEP_FILES[phase]), 'utf8');
+  const steps = fs.readFileSync(packageRootPath('templates', stepFile(phase, platform)), 'utf8');
   // Inline the phase's step body first so its own {{...}} placeholders are
   // filled by the shared replacement pass below.
-  let prompt = shell.replace('{{PHASE_STEPS}}', steps);
+  let prompt = shell
+    .replace('{{PHASE_STEPS}}', steps)
+    .replace('{{REFERENCE_SECTION}}', platform === 'web' ? WEB_REFERENCE : MOBILE_REFERENCE);
   for (const [key, value] of Object.entries(replacements)) {
     prompt = prompt.replaceAll(`{{${key}}}`, value);
   }
@@ -305,21 +329,36 @@ function renderPrompt(phase: PromptPhase, replacements: Record<string, string>):
  * captured session. Integrations are unknown here, so that section is empty. */
 export function buildSnippetPrompt(input: SnippetPromptInput): string {
   const headless = input.mode === 'headless';
-  return renderPrompt('snippet', {
+  const shared = {
     TITLE_LINE: TITLE_LINE.snippet,
     MODE_SECTION: headless ? headlessModeSection(REPORT_FILE.snippet) : INTERACTIVE_MODE_SECTION,
     TELEMETRY_SECTION: telemetrySection('snippet', input.telemetry),
     INTEGRATIONS_SECTION: '',
-    SNIPPET: input.snippet,
     ...gates(headless),
-  });
+  };
+  if ('snippet' in input) return renderPrompt('snippet', 'web', { ...shared, SNIPPET: input.snippet });
+  return renderPrompt('snippet', input.mobile.platform, { ...shared, ...mobileReplacements(input.mobile) });
+}
+
+const DEFAULT_SERVER_URL = 'https://fullstory.com';
+
+/** The server URL lines only appear for non-default realms (EU), where leaving them out would send data to the wrong place. */
+function mobileReplacements({ orgId, serverUrl }: MobileCaptureConfig): Record<string, string> {
+  const custom = serverUrl !== DEFAULT_SERVER_URL;
+  return {
+    ORG_ID: orgId,
+    SERVER_URL: serverUrl,
+    EXPO_HOST_PROPERTY: custom ? `,\n  "host": "${new URL(serverUrl).host}"` : '',
+    GRADLE_SERVER_LINE: custom ? `\n       serverUrl '${serverUrl}'` : '',
+    PLIST_SERVER_ENTRY: custom ? `\n       <key>ServerUrl</key>\n       <string>${serverUrl}</string>` : '',
+  };
 }
 
 /** Phase 2: the enrichment follow-up — identify users, link analytics, mask
  * PII — driven after the user has seen their first captured session. */
 export function buildEnrichPrompt(input: EnrichPromptInput): string {
   const headless = input.mode === 'headless';
-  return renderPrompt('enrich', {
+  return renderPrompt('enrich', input.platform ?? 'web', {
     TITLE_LINE: TITLE_LINE.enrich,
     MODE_SECTION: headless
       ? `${headlessModeSection(REPORT_FILE.enrich)}\n\n${EXTRAS_RESULT_SECTION}`
