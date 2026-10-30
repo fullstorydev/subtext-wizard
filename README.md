@@ -100,6 +100,8 @@ Steps: `snippet`, `csp`, `identify`, `integrations`, `privacy`, `plugin`. Status
 
 Requires Node 18.17+.
 
+To run against a local Fullstory stack, set `SUBTEXT_DEV=1` with `SUBTEXT_AUTH_BASE_URL`, `SUBTEXT_API_BASE_URL` and `SUBTEXT_APP_BASE_URL`. The snippet then captures to the matching dev hosts (`api.X` → `X` and `edge.X/s/fs.js`); set `SUBTEXT_CAPTURE_HOST` and `SUBTEXT_CAPTURE_SCRIPT` if your stack differs.
+
 ```sh
 npm install
 npm run build             # tsc → dist/

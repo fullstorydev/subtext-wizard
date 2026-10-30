@@ -36,6 +36,37 @@ describe('host resolution', () => {
     });
   });
 
+  it('captures to the dev stack when the API host is overridden', async () => {
+    const config = await loadConfig({
+      SUBTEXT_DEV: '1',
+      SUBTEXT_API_BASE_URL: 'https://api.fullstory.test:8043',
+      SUBTEXT_CAPTURE_HOST: undefined,
+      SUBTEXT_CAPTURE_SCRIPT: undefined,
+    });
+    expect(config.captureHosts('us')).toEqual({
+      host: 'fullstory.test:8043',
+      script: 'edge.fullstory.test:8043/s/fs.js',
+    });
+  });
+
+  it('prefers explicit capture overrides, and ignores them all without SUBTEXT_DEV', async () => {
+    const dev = await loadConfig({
+      SUBTEXT_DEV: '1',
+      SUBTEXT_API_BASE_URL: 'https://api.fullstory.test:8043',
+      SUBTEXT_CAPTURE_HOST: 'capture.example.test',
+      SUBTEXT_CAPTURE_SCRIPT: 'cdn.example.test/fs.js',
+    });
+    expect(dev.captureHosts('us')).toEqual({ host: 'capture.example.test', script: 'cdn.example.test/fs.js' });
+
+    const prod = await loadConfig({
+      SUBTEXT_DEV: undefined,
+      SUBTEXT_API_BASE_URL: 'https://api.fullstory.test:8043',
+      SUBTEXT_CAPTURE_HOST: 'capture.example.test',
+      SUBTEXT_CAPTURE_SCRIPT: 'cdn.example.test/fs.js',
+    });
+    expect(prod.captureHosts('us')).toEqual({ host: 'fullstory.com', script: 'edge.fullstory.com/s/fs.js' });
+  });
+
   it('derives the telemetry URL and the OAuth resource indicator from the API host', async () => {
     const config = await loadConfig();
     expect(config.telemetryUrl('us')).toBe('https://api.fullstory.com/subtext/telemetry');
