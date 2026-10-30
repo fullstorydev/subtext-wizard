@@ -7,6 +7,7 @@ import {
   warnOnDevOverrides,
   type WizardOptions,
 } from './config.js';
+import { AGENT_SUBCOMMANDS, runAgentSubcommand } from './agentCli.js';
 import { runHeadless } from './headless.js';
 import { runWizard } from './run.js';
 
@@ -15,6 +16,19 @@ Subtext setup — install the Subtext capture snippet with your own coding agent
 
 Usage:
   npx @subtextdev/subtext-wizard [options]
+  npx @subtextdev/subtext-wizard <command>   (for coding agents)
+
+Commands (the token is stored locally and never printed):
+  auth                    Sign in with a device-flow link; waits for approval,
+                          then prints the org id. --no-open to skip the browser.
+  snippet                 Print the org's capture snippet (--org <id> to skip auth)
+  report <step> <status>  Update the install checklist. Steps: snippet, csp,
+                          identify, integrations, privacy, plugin. Statuses:
+                          complete, partial, skipped, problem. On integrations,
+                          repeat --integration <name> for each tool linked.
+  wait-first-event        Wait until the first session arrives (--timeout <sec>,
+                          default 300)
+  checklist               Print the install checklist
 
 Options:
   --dir <path>            App directory to instrument (default: current directory)
@@ -90,8 +104,11 @@ function main(): void {
         debug: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
+        integration: { type: 'string', multiple: true },
+        timeout: { type: 'string' },
+        'no-open': { type: 'boolean', default: false },
       },
-      allowPositionals: false,
+      allowPositionals: true,
     });
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
@@ -99,7 +116,12 @@ function main(): void {
     process.exit(2);
   }
 
-  const { values } = parsed;
+  const { values, positionals } = parsed;
+  const [command, ...commandArgs] = positionals;
+  if (command && !AGENT_SUBCOMMANDS.includes(command)) {
+    console.error(`Unknown command "${command}".\n${HELP}`);
+    process.exit(2);
+  }
   if (values.help) {
     console.log(HELP);
     return;
@@ -149,6 +171,21 @@ function main(): void {
     telemetry: !(values['no-telemetry'] ?? false) && !telemetryOptedOutByEnv(),
     debug: values.debug ?? false,
   };
+
+  if (command) {
+    runAgentSubcommand(
+      command,
+      commandArgs,
+      {
+        integration: values.integration ?? [],
+        org: values.org,
+        timeout: values.timeout,
+        noOpen: values['no-open'] ?? false,
+      },
+      options,
+    ).then((code) => process.exit(code));
+    return;
+  }
 
   if ((options.org || options.externalAgent) && !options.headless) {
     console.error('--org and --external-agent only work with --headless.');
