@@ -67,6 +67,16 @@ describe('host resolution', () => {
     expect(prod.captureHosts('us')).toEqual({ host: 'fullstory.com', script: 'edge.fullstory.com/s/fs.js' });
   });
 
+  it('builds the settings overview link from the app host', async () => {
+    expect((await loadConfig()).settingsOverviewUrl('us', 'o-1A2B-na1')).toBe(
+      'https://app.fullstory.com/ui/o-1A2B-na1/settings/overview',
+    );
+    const dev = await loadConfig({ SUBTEXT_DEV: '1', SUBTEXT_APP_BASE_URL: 'https://app.fullstory.test:8043' });
+    expect(dev.settingsOverviewUrl('us', 'o-1A2B-na1')).toBe(
+      'https://app.fullstory.test:8043/ui/o-1A2B-na1/settings/overview',
+    );
+  });
+
   it('derives the telemetry URL and the OAuth resource indicator from the API host', async () => {
     const config = await loadConfig();
     expect(config.telemetryUrl('us')).toBe('https://api.fullstory.com/subtext/telemetry');

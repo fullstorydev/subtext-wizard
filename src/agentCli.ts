@@ -8,6 +8,7 @@ import {
   OAUTH_TOKEN_PATH,
   apiBaseUrl,
   authBaseUrl,
+  settingsOverviewUrl,
   subtextOauthResource,
   type Region,
   type WizardOptions,
@@ -138,6 +139,7 @@ async function runAuth(options: WizardOptions, flags: { noOpen: boolean }): Prom
       });
       console.log(`Signed in${claims.userEmail ? ` as ${claims.userEmail}` : ''}.`);
       console.log(`org_id: ${claims.orgId}`);
+      console.log(`settings: ${settingsOverviewUrl(region, claims.orgId)}`);
       return 0;
     }
     const err = r.json.error;

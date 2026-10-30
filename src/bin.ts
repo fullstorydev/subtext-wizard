@@ -20,7 +20,8 @@ Usage:
 
 Commands (the token is stored locally and never printed):
   auth                    Sign in with a device-flow link; waits for approval,
-                          then prints the org id. --no-open to skip the browser.
+                          then prints the org id and a settings link to give
+                          the user. --no-open to skip the browser.
   snippet                 Print the org's capture snippet (--org <id> to skip auth)
   report <step> <status>  Update the install checklist. Steps: snippet, csp,
                           identify, integrations, privacy, plugin. Statuses:

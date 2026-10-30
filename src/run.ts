@@ -8,7 +8,7 @@ import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
 import type { LaunchResult } from './agents/types.js';
 import type { WizardOptions } from './config.js';
-import { WIZARD_VERSION, telemetryUrl } from './config.js';
+import { WIZARD_VERSION, settingsOverviewUrl, telemetryUrl } from './config.js';
 import { showDemoGuide } from './demo.js';
 import { offerFollowUpPrompt } from './followUp.js';
 import type { OpenAgentTarget } from './openAgent.js';
@@ -82,6 +82,16 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     }
     const auth = await authenticate(options, openInBrowser);
     telemetry.note('auth_completed', { via: options.apiKey ? 'api_key' : 'browser' });
+
+    // Give the user somewhere to watch the install from. The checklist on this
+    // page fills in as the wizard reports each step. Printed, not opened: the
+    // login just took over the browser once already.
+    if (!options.mock) {
+      p.note(
+        `${pc.cyan(settingsOverviewUrl(auth.region, auth.orgId))}\n${pc.dim('Open this to follow the install checklist as each step completes.')}`,
+        'Your Subtext settings',
+      );
+    }
 
     // 2. Org-specific capture snippet.
     const snippet = await fetchCaptureSnippet(auth, options);

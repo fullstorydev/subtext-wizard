@@ -105,6 +105,11 @@ export function appBaseUrl(region: Region): string {
   );
 }
 
+/** The org's Subtext settings overview, where the install checklist shows progress. */
+export function settingsOverviewUrl(region: Region, orgId: string): string {
+  return `${appBaseUrl(region)}/ui/${encodeURIComponent(orgId)}/settings/overview`;
+}
+
 /**
  * Capture hosts baked into the snippet, realm-aware. A dev stack captures to
  * its own hosts; without this a local org's sessions go to production and the
