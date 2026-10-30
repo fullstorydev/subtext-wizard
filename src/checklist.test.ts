@@ -21,13 +21,10 @@ describe('reportStep', () => {
     expect(client.calls[0].body).toEqual({ step: 'INSTALL_STEP_SNIPPET', status: 'INSTALL_STEP_STATUS_COMPLETE' });
   });
 
-  it('sends known integrations only on the integrations step, dropping unknown tools', async () => {
+  it('sends only step and status', async () => {
     const client = fakeClient(() => json({}));
-    await reportStep(client, 'integrations', 'complete', ['posthog', 'heap', 'sentry']);
-    expect(client.calls[0].body).toMatchObject({ integrations: ['INTEGRATION_POSTHOG', 'INTEGRATION_SENTRY'] });
-
-    await reportStep(client, 'privacy', 'complete', ['posthog']);
-    expect(client.calls[1].body).not.toHaveProperty('integrations');
+    await reportStep(client, 'integrations', 'problem');
+    expect(client.calls[0].body).toEqual({ step: 'INSTALL_STEP_INTEGRATIONS', status: 'INSTALL_STEP_STATUS_PROBLEM' });
   });
 
   it('returns 0 instead of throwing when the request fails', async () => {

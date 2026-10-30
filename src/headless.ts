@@ -167,8 +167,7 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
  */
 async function reportResult(client: ApiClient | undefined, result: InstallResult): Promise<void> {
   if (!client) return;
-  const send = (step: Parameters<typeof reportStep>[1], status: ChecklistStatus, integrations?: string[]) =>
-    reportStep(client, step, status, integrations);
+  const send = (step: Parameters<typeof reportStep>[1], status: ChecklistStatus) => reportStep(client, step, status);
   if (result.snippet.status === 'installed') await send('snippet', 'complete');
   else if (result.snippet.status === 'failed') await send('snippet', 'problem');
   const extras = result.extras;

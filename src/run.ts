@@ -114,13 +114,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // The install checklist the user watches in Subtext. Mock and dry runs
     // never report; everything else is best-effort and silent on failure.
     const checklist: ApiClient | undefined = options.mock || options.printPrompt ? undefined : authClient(auth);
-    const report = async (
-      step: Parameters<typeof reportStep>[1],
-      status: ChecklistStatus,
-      integrations?: string[],
-    ) => {
+    const report = async (step: Parameters<typeof reportStep>[1], status: ChecklistStatus) => {
       if (!checklist) return;
-      const code = await reportStep(checklist, step, status, integrations);
+      const code = await reportStep(checklist, step, status);
       onEvent('checklist_reported', { step, status, http_status: code });
     };
 
@@ -314,12 +310,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     // The extras result file is the agent's own account of each step. No file
     // means the run never finished, so those steps are a problem, not skipped.
-    const reportExtras = async (results: ExtrasResults | undefined, tools: string[]) => {
+    const reportExtras = async (results: ExtrasResults | undefined) => {
       const toStatus = (item?: { status: 'done' | 'skipped' | 'failed' }): ChecklistStatus =>
         !item ? 'problem' : item.status === 'done' ? 'complete' : item.status === 'skipped' ? 'skipped' : 'problem';
-      const analytics = toStatus(results?.analytics);
       await report('identify', toStatus(results?.identity));
-      await report('integrations', analytics, analytics === 'complete' ? tools : []);
+      await report('integrations', toStatus(results?.analytics));
       await report('privacy', toStatus(results?.masking));
     };
 
@@ -541,7 +536,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     if (!snippetInstalled) {
       // The agent handled the snippet, including any CSP, so the two share an outcome.
-      const phase1: ChecklistStatus = result.exitCode !== 0 ? 'problem' : installConfirmed ? 'complete' : 'partial';
+      // Exit 0 without the agent's install marker may mean it gave up partway, which counts as a problem.
+      const phase1: ChecklistStatus = result.exitCode === 0 && installConfirmed ? 'complete' : 'problem';
       await report('snippet', phase1);
       await report('csp', phase1);
     }
@@ -617,7 +613,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           // Our own summary from the agent's result file; its raw message is
           // only the fallback when the file never got written.
           extras = readExtrasResults(options.dir, startedAt);
-          await reportExtras(extras, scope.selection.integrations.map((i) => i.id));
+          await reportExtras(extras);
           if (extras) showExtrasResults(extras);
           else if (enrichResult.finalMessage) p.log.message(pc.dim(enrichResult.finalMessage));
         }

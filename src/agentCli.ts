@@ -13,7 +13,6 @@ import {
   type WizardOptions,
 } from './config.js';
 import {
-  CHECKLIST_INTEGRATIONS,
   CHECKLIST_STATUSES,
   CHECKLIST_STEPS,
   getChecklist,
@@ -33,7 +32,7 @@ import { fetchCaptureSnippet } from './snippet.js';
  *
  *   auth                 device-flow sign-in; prints the link, waits, prints the org id
  *   snippet              prints the org's capture snippet
- *   report <step> <status> [--integration <name> ...]
+ *   report <step> <status>
  *   wait-first-event     waits until the org's first session arrives
  *   checklist            prints the checklist
  */
@@ -181,7 +180,7 @@ function sessionClient(s: Session): ApiClient {
   };
 }
 
-async function runReport(options: WizardOptions, args: string[], integrations: string[]): Promise<number> {
+async function runReport(options: WizardOptions, args: string[]): Promise<number> {
   const [step, status] = args;
   if (!CHECKLIST_STEPS.includes(step as ChecklistStep)) {
     throw new UsageError(`Unknown step "${step ?? ''}". Use one of: ${CHECKLIST_STEPS.join(', ')}`);
@@ -189,17 +188,7 @@ async function runReport(options: WizardOptions, args: string[], integrations: s
   if (!CHECKLIST_STATUSES.includes(status as ChecklistStatus)) {
     throw new UsageError(`Unknown status "${status ?? ''}". Use one of: ${CHECKLIST_STATUSES.join(', ')}`);
   }
-  if (integrations.length > 0 && step !== 'integrations') {
-    throw new UsageError('--integration only applies to the integrations step.');
-  }
-  const names = integrations.map((i) => i.trim().toLowerCase());
-  const unknown = names.filter((n) => !CHECKLIST_INTEGRATIONS.includes(n));
-  if (unknown.length > 0) {
-    throw new UsageError(
-      `Unknown integration "${unknown[0]}". Use one of: ${CHECKLIST_INTEGRATIONS.join(', ')}. Leave out tools not on this list.`,
-    );
-  }
-  const code = await reportStep(sessionClient(loadSession(options.region)), step as ChecklistStep, status as ChecklistStatus, names);
+  const code = await reportStep(sessionClient(loadSession(options.region)), step as ChecklistStep, status as ChecklistStatus);
   if (code < 200 || code >= 300) {
     console.log(`Report not saved (${code || 'no response'}). Carry on with the install.`);
     return 1;
@@ -247,7 +236,7 @@ export const AGENT_SUBCOMMANDS = ['auth', 'snippet', 'report', 'wait-first-event
 export async function runAgentSubcommand(
   command: string,
   args: string[],
-  flags: { integration: string[]; org?: string; timeout?: string; noOpen: boolean },
+  flags: { org?: string; timeout?: string; noOpen: boolean },
   options: WizardOptions,
 ): Promise<number> {
   try {
@@ -257,7 +246,7 @@ export async function runAgentSubcommand(
       case 'snippet':
         return await runSnippet(options, flags.org);
       case 'report':
-        return await runReport(options, args, flags.integration);
+        return await runReport(options, args);
       case 'wait-first-event':
         return await runWaitFirstEvent(options, Number(flags.timeout ?? 300));
       case 'checklist':

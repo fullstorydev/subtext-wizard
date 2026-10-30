@@ -89,12 +89,12 @@ For a coding agent following the install instructions at subtext.fullstory.com/i
 ```
 npx @subtextdev/subtext-wizard auth                  # device-flow sign-in; prints the link, waits, prints the org id
 npx @subtextdev/subtext-wizard snippet               # print the org's capture snippet
-npx @subtextdev/subtext-wizard report <step> <status> [--integration <name> ...]
+npx @subtextdev/subtext-wizard report <step> <status>
 npx @subtextdev/subtext-wizard wait-first-event      # wait up to 5 minutes for the first session
 npx @subtextdev/subtext-wizard checklist             # print the checklist
 ```
 
-Steps: `snippet`, `csp`, `identify`, `integrations`, `privacy`, `plugin`. Statuses: `complete`, `partial`, `skipped`, `problem`.
+Steps: `snippet`, `csp`, `identify`, `integrations`, `privacy`, `plugin`. Statuses: `complete`, `problem` (it didn't work, or only partly), `skipped`.
 
 ## Development
 

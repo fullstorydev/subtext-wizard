@@ -24,8 +24,8 @@ Commands (the token is stored locally and never printed):
   snippet                 Print the org's capture snippet (--org <id> to skip auth)
   report <step> <status>  Update the install checklist. Steps: snippet, csp,
                           identify, integrations, privacy, plugin. Statuses:
-                          complete, partial, skipped, problem. On integrations,
-                          repeat --integration <name> for each tool linked.
+                          complete, problem (didn't work, or only partly),
+                          skipped.
   wait-first-event        Wait until the first session arrives (--timeout <sec>,
                           default 300)
   checklist               Print the install checklist
@@ -104,7 +104,6 @@ function main(): void {
         debug: { type: 'boolean', default: false },
         version: { type: 'boolean', default: false },
         help: { type: 'boolean', default: false },
-        integration: { type: 'string', multiple: true },
         timeout: { type: 'string' },
         'no-open': { type: 'boolean', default: false },
       },
@@ -177,7 +176,6 @@ function main(): void {
       command,
       commandArgs,
       {
-        integration: values.integration ?? [],
         org: values.org,
         timeout: values.timeout,
         noOpen: values['no-open'] ?? false,

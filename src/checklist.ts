@@ -15,16 +15,11 @@ export const CHECKLIST_PATH = '/subtext/install/checklist';
 export const FIRST_EVENT_PATH = '/subtext/install/first-event';
 
 export type ChecklistStep = 'snippet' | 'csp' | 'identify' | 'integrations' | 'privacy' | 'plugin';
-export type ChecklistStatus = 'complete' | 'partial' | 'skipped' | 'problem';
+// Anything that only partly worked is a problem; the agent explains it in its summary.
+export type ChecklistStatus = 'complete' | 'problem' | 'skipped';
 
 export const CHECKLIST_STEPS: ChecklistStep[] = ['snippet', 'csp', 'identify', 'integrations', 'privacy', 'plugin'];
-export const CHECKLIST_STATUSES: ChecklistStatus[] = ['complete', 'partial', 'skipped', 'problem'];
-
-// Mirrors the server's Integration enum; anything else is rejected with a 400.
-export const CHECKLIST_INTEGRATIONS = [
-  'posthog', 'segment', 'amplitude', 'mixpanel', 'sentry', 'datadog', 'logrocket',
-  'statsig', 'launchdarkly', 'growthbook', 'intercom', 'pendo', 'appcues',
-];
+export const CHECKLIST_STATUSES: ChecklistStatus[] = ['complete', 'problem', 'skipped'];
 
 export interface ApiClient {
   fetch(pathname: string, init?: RequestInit): Promise<Response>;
@@ -43,21 +38,12 @@ export function authClient(auth: SubtextAuth): ApiClient {
 }
 
 /** POST one step. Returns the HTTP status, or 0 if the request never landed. */
-export async function reportStep(
-  client: ApiClient,
-  step: ChecklistStep,
-  status: ChecklistStatus,
-  integrations: string[] = [],
-): Promise<number> {
-  const body: Record<string, unknown> = {
+export async function reportStep(client: ApiClient, step: ChecklistStep, status: ChecklistStatus): Promise<number> {
+  // The server rejects any field beyond these two.
+  const body = {
     step: `INSTALL_STEP_${step.toUpperCase()}`,
     status: `INSTALL_STEP_STATUS_${status.toUpperCase()}`,
   };
-  // Unknown tools are dropped rather than failing the whole report.
-  const known = integrations.filter((i) => CHECKLIST_INTEGRATIONS.includes(i));
-  if (step === 'integrations' && known.length > 0) {
-    body.integrations = known.map((i) => `INTEGRATION_${i.toUpperCase()}`);
-  }
   try {
     const res = await client.fetch(CHECKLIST_PATH, {
       method: 'POST',
