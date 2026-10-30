@@ -14,6 +14,7 @@ import {
   type ExtrasResults,
 } from './extras.js';
 import { detectInstalledIntegrations, selectIntegrations } from './integrations.js';
+import { authClient, reportStep, type ApiClient, type ChecklistStatus } from './checklist.js';
 import { buildEnrichPrompt, buildSnippetPrompt, type PromptTelemetry } from './prompt/build.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { runStaticInstall, type StaticOutcome } from './staticInstall/index.js';
@@ -46,8 +47,11 @@ interface InstallResult {
 
 export async function runHeadless(options: WizardOptions): Promise<number> {
   const telemetry = new Telemetry(options.telemetry, options.debug);
+  // Set once authenticated. --org has no credential, so it can't report.
+  let checklist: ApiClient | undefined;
   const finish = async (result: InstallResult, code: number): Promise<number> => {
     writeResult(options.dir, result);
+    await reportResult(checklist, result);
     p.log.info(`Wrote ${INSTALL_RESULT}`);
     await telemetry.flush();
     return code;
@@ -67,6 +71,7 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
       ? { accessToken: '', authScheme: 'Bearer', orgId: options.org, region: options.org.endsWith('-eu1') ? 'eu' : options.region }
       : await authenticate(options, false);
     const snippet = await fetchCaptureSnippet(auth, options);
+    if (!options.org && !options.mock) checklist = authClient(auth);
     if (options.telemetry && !options.mock && !options.org) {
       telemetry.authorize(telemetryUrl(auth.region), auth.accessToken, auth.authScheme);
     }
@@ -153,6 +158,29 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
     p.log.error(reason);
     telemetry.finish('fail', agent ? { harness: agent.definition.id } : {});
     return finish({ snippet: { status: 'failed', reason }, extras: { status: 'skipped', reason: 'run failed' }, agent: agent?.definition.id ?? null }, 1);
+  }
+}
+
+/**
+ * Mirror the run's outcome into the org's install checklist. Pending steps
+ * (handed to --external-agent) are left for that agent to report.
+ */
+async function reportResult(client: ApiClient | undefined, result: InstallResult): Promise<void> {
+  if (!client) return;
+  const send = (step: Parameters<typeof reportStep>[1], status: ChecklistStatus, integrations?: string[]) =>
+    reportStep(client, step, status, integrations);
+  if (result.snippet.status === 'installed') await send('snippet', 'complete');
+  else if (result.snippet.status === 'failed') await send('snippet', 'problem');
+  const extras = result.extras;
+  if (extras.status === 'done') {
+    const toStatus = (item?: { status: string }): ChecklistStatus =>
+      !item ? 'problem' : item.status === 'done' ? 'complete' : item.status === 'skipped' ? 'skipped' : 'problem';
+    await send('identify', toStatus(extras.results.identity));
+    await send('integrations', toStatus(extras.results.analytics));
+    await send('privacy', toStatus(extras.results.masking));
+  } else if (extras.status === 'skipped' || extras.status === 'failed') {
+    const status: ChecklistStatus = extras.status === 'failed' ? 'problem' : 'skipped';
+    for (const step of ['identify', 'integrations', 'privacy'] as const) await send(step, status);
   }
 }
 

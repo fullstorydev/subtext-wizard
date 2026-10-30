@@ -1,12 +1,12 @@
 {
   "name": "@subtextdev/subtext-wizard",
-  "version": "0.4.0-agent.0",
+  "version": "0.3.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@subtextdev/subtext-wizard",
-      "version": "0.4.0-agent.0",
+      "version": "0.3.0",
       "license": "MIT",
       "dependencies": {
         "@babel/parser": "^7.29.9",

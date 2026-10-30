@@ -73,6 +73,29 @@ SUBTEXT_API_KEY=... npx @subtextdev/subtext-wizard --headless --dir path/to/app
 
 It uses `--agent` if given, otherwise the first of Claude Code, Codex CLI, or Gemini CLI on the machine; the agent needs its own credentials (e.g. `ANTHROPIC_API_KEY`). With no agent, only the direct snippet install runs. There's no browser login, plugin setup, demo, or clipboard. The outcome is written to `.subtext/install-result.json`, and the exit code is `0` when the snippet is installed, `1` when it isn't, and `2` when no credential was given.
 
+## Install checklist
+
+Subtext shows an install checklist on its settings page while you set up. The wizard reports to it as it goes, from what it can actually see:
+
+- **Terminal agents** (Claude Code, Codex, Gemini CLI): every step, from the snippet outcome, the agent's extras results, and plugin setup.
+- **App handoffs and copied prompts** (Cursor, VS Code, and the like): the work happens outside the wizard, so it reports what it did itself and marks identity, analytics, and privacy as skipped.
+
+Either way, the wizard ends by offering to wait for your first session, and the checklist's verify step completes on its own once one arrives. `--headless` reports too when it has a credential; with `--org` there's nothing to report with.
+
+## Agent commands
+
+For a coding agent following the install instructions at subtext.fullstory.com/install.txt. The agent never handles a token: `auth` stores it locally (`~/.config/subtext/`, mode 0600) and the other commands read it back.
+
+```
+npx @subtextdev/subtext-wizard auth                  # device-flow sign-in; prints the link, waits, prints the org id
+npx @subtextdev/subtext-wizard snippet               # print the org's capture snippet
+npx @subtextdev/subtext-wizard report <step> <status> [--integration <name> ...]
+npx @subtextdev/subtext-wizard wait-first-event      # wait up to 5 minutes for the first session
+npx @subtextdev/subtext-wizard checklist             # print the checklist
+```
+
+Steps: `snippet`, `csp`, `identify`, `integrations`, `privacy`, `plugin`. Statuses: `complete`, `partial`, `skipped`, `problem`.
+
 ## Development
 
 Requires Node 18.17+.

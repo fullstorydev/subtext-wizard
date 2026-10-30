@@ -37,6 +37,7 @@ import {
   type ExtrasResults,
   type ExtrasScope,
 } from './extras.js';
+import { authClient, reportStep, waitForFirstEvent, type ApiClient, type ChecklistStatus } from './checklist.js';
 import { fetchCaptureSnippet } from './snippet.js';
 import { runStaticInstall } from './staticInstall/index.js';
 import { Telemetry } from './telemetry.js';
@@ -110,6 +111,19 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       telemetry.authorize(telemetryUrl(auth.region), auth.accessToken, auth.authScheme);
     }
 
+    // The install checklist the user watches in Subtext. Mock and dry runs
+    // never report; everything else is best-effort and silent on failure.
+    const checklist: ApiClient | undefined = options.mock || options.printPrompt ? undefined : authClient(auth);
+    const report = async (
+      step: Parameters<typeof reportStep>[1],
+      status: ChecklistStatus,
+      integrations?: string[],
+    ) => {
+      if (!checklist) return;
+      const code = await reportStep(checklist, step, status, integrations);
+      onEvent('checklist_reported', { step, status, http_status: code });
+    };
+
     // Integration selection has moved into the enrichment step (phase 2): the
     // fast path to a first captured session only installs the snippet, so we
     // don't need to know the analytics stack until we link the session URL in.
@@ -119,6 +133,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // declined/failed edit) falls through to the agent-driven install below.
     const staticInstall = await runStaticInstall(snippet, options, onEvent);
     const snippetInstalled = staticInstall.status !== 'fallback';
+    if (snippetInstalled) {
+      await report('snippet', 'complete');
+      // The static installer bails on any CSP, so placing the snippet means there wasn't one.
+      if (staticInstall.status === 'installed') await report('csp', 'skipped');
+    }
 
     // 3. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
@@ -281,6 +300,47 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       return scope;
     };
 
+    // A handoff (another app, or a copied prompt) runs outside the wizard, so
+    // it can't see what the agent did. It reports only what it knows, marks
+    // the agent's steps skipped, and lets the first-session check at the end
+    // show whether capture actually works. The verify step completes itself on
+    // the server once a session arrives.
+    const reportHandoff = async () => {
+      if (!snippetInstalled) await report('snippet', 'skipped');
+      await report('identify', 'skipped');
+      await report('integrations', 'skipped');
+      await report('privacy', 'skipped');
+    };
+
+    // The extras result file is the agent's own account of each step. No file
+    // means the run never finished, so those steps are a problem, not skipped.
+    const reportExtras = async (results: ExtrasResults | undefined, tools: string[]) => {
+      const toStatus = (item?: { status: 'done' | 'skipped' | 'failed' }): ChecklistStatus =>
+        !item ? 'problem' : item.status === 'done' ? 'complete' : item.status === 'skipped' ? 'skipped' : 'problem';
+      const analytics = toStatus(results?.analytics);
+      await report('identify', toStatus(results?.identity));
+      await report('integrations', analytics, analytics === 'complete' ? tools : []);
+      await report('privacy', toStatus(results?.masking));
+    };
+
+    // Offer to wait for the first session, so the run ends on proof that
+    // capture works rather than on "deploy and hope".
+    const verifyFirstSession = async () => {
+      if (!checklist || options.yes) return;
+      const go = await p.confirm({
+        message: `Wait for your first session? ${pc.dim('(load the app in a browser while this waits)')}`,
+        initialValue: true,
+      });
+      if (p.isCancel(go) || !go) return;
+      const spinner = p.spinner();
+      spinner.start('Waiting for your first session (up to 5 minutes)…');
+      const outcome = await waitForFirstEvent(checklist, 5 * 60_000);
+      onEvent('first_event_wait', { outcome });
+      if (outcome === 'received') spinner.stop(pc.green('First session received. Subtext is capturing.'));
+      else if (outcome === 'unauthorized') spinner.stop("Couldn't check for sessions; look for it in Subtext under Sessions.", 1);
+      else spinner.stop('No session yet. Make sure the app with the snippet is loaded, then check Subtext under Sessions.', 1);
+    };
+
     // ----- Manual handoff: copy the phase-1 prompt, then offer phase 2 as a
     // copyable follow-up (we never drive a manual agent, so no second run). ---
     if (chosen === MANUAL_CHOICE) {
@@ -308,6 +368,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       }
       // Plugin setup — we don't know the harness, so show every path.
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, onEvent);
+      await reportHandoff();
       await showDemoGuide({
         agentName: 'your coding agent',
         installPending: !snippetInstalled,
@@ -330,6 +391,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
+      await verifyFirstSession();
       p.outro(snippetInstalled ? DEPLOY_OUTRO : 'Run this installer again any time with: npx @subtextdev/subtext-wizard');
       await telemetry.flush();
       return 0;
@@ -371,6 +433,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         exit_code: result.exitCode ?? null,
       });
       if (!snippetInstalled && result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
+      await report('plugin', pluginReady ? 'complete' : 'skipped');
+      await reportHandoff();
       await showDemoGuide({
         agentName: chosen.definition.name,
         installPending: !snippetInstalled,
@@ -397,6 +461,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
+      await verifyFirstSession();
       p.outro(
         snippetInstalled
           ? DEPLOY_OUTRO
@@ -474,6 +539,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // instructions, exit code is all we have.)
     const installConfirmed = snippetInstalled || installSucceeded || promptTelemetry !== 'stdout';
 
+    if (!snippetInstalled) {
+      // The agent handled the snippet, including any CSP, so the two share an outcome.
+      const phase1: ChecklistStatus = result.exitCode !== 0 ? 'problem' : installConfirmed ? 'complete' : 'partial';
+      await report('snippet', phase1);
+      await report('csp', phase1);
+    }
+
     if (result.exitCode !== 0) {
       // Phase 1 failed — the snippet isn't in, so there's nothing to review and
       // no point offering the enrichment run. Close the funnel as failed.
@@ -495,6 +567,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // run must not launch the agent.
     if (!options.printPrompt) {
       await offerPluginSetup(chosen, auth.region, options, onEvent, reviewToolsConsent);
+      await report('plugin', reviewToolsConsent === false ? 'skipped' : 'complete');
     }
     await showDemoGuide({
       agentName: chosen.definition.name,
@@ -544,6 +617,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           // Our own summary from the agent's result file; its raw message is
           // only the fallback when the file never got written.
           extras = readExtrasResults(options.dir, startedAt);
+          await reportExtras(extras, scope.selection.integrations.map((i) => i.id));
           if (extras) showExtrasResults(extras);
           else if (enrichResult.finalMessage) p.log.message(pc.dim(enrichResult.finalMessage));
         }
@@ -557,6 +631,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         });
       }
     }
+
+    if (!extrasRan) {
+      await report('identify', 'skipped');
+      await report('integrations', 'skipped');
+      await report('privacy', 'skipped');
+    }
+    await verifyFirstSession();
 
     // The single `complete` for the whole (two-phase) terminal run.
     telemetry.step('complete', installConfirmed ? 'success' : 'partial', {

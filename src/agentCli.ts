@@ -12,6 +12,17 @@ import {
   type Region,
   type WizardOptions,
 } from './config.js';
+import {
+  CHECKLIST_INTEGRATIONS,
+  CHECKLIST_STATUSES,
+  CHECKLIST_STEPS,
+  getChecklist,
+  reportStep,
+  waitForFirstEvent,
+  type ApiClient,
+  type ChecklistStatus,
+  type ChecklistStep,
+} from './checklist.js';
 import { fetchCaptureSnippet } from './snippet.js';
 
 /**
@@ -29,11 +40,6 @@ import { fetchCaptureSnippet } from './snippet.js';
 
 const DEVICE_AUTHORIZATION_PATH = '/oauth/device_authorization';
 const DEVICE_GRANT = 'urn:ietf:params:oauth:grant-type:device_code';
-const CHECKLIST_PATH = '/subtext/install/checklist';
-const FIRST_EVENT_PATH = '/subtext/install/first-event';
-
-const STEPS = ['snippet', 'csp', 'identify', 'integrations', 'privacy', 'plugin', 'verify'] as const;
-const STATUSES = ['complete', 'partial', 'skipped', 'problem'] as const;
 
 interface Session {
   clientId: string;
@@ -147,67 +153,55 @@ async function runAuth(options: WizardOptions, flags: { noOpen: boolean }): Prom
 
 // Retries once after a refresh on 401, so a long install doesn't die at the
 // token's expiry.
-async function apiFetch(s: Session, pathname: string, init: RequestInit = {}): Promise<Response> {
-  const go = () =>
-    fetch(`${s.apiBase}${pathname}`, {
-      ...init,
-      headers: { ...(init.headers ?? {}), Authorization: `Bearer ${s.accessToken}` },
-      signal: AbortSignal.timeout(15_000),
-    });
-  let res = await go();
-  if (res.status === 401 && s.refreshToken) {
-    const r = await postForm(`${s.authBase}${OAUTH_TOKEN_PATH}`, {
-      grant_type: 'refresh_token',
-      refresh_token: s.refreshToken,
-      client_id: s.clientId,
-    });
-    if (r.status === 200 && r.json.access_token) {
-      s.accessToken = r.json.access_token;
-      if (r.json.refresh_token) s.refreshToken = r.json.refresh_token;
-      saveSession(s);
-      res = await go();
-    }
-  }
-  return res;
-}
-
-const INTEGRATIONS = [
-  'posthog', 'segment', 'amplitude', 'mixpanel', 'sentry', 'datadog', 'logrocket',
-  'statsig', 'launchdarkly', 'growthbook', 'intercom', 'pendo', 'appcues',
-];
-
-function parseIntegration(name: string): string {
-  const n = name.trim().toLowerCase();
-  if (!INTEGRATIONS.includes(n)) {
-    throw new UsageError(`Unknown integration "${name}". Use one of: ${INTEGRATIONS.join(', ')}. Leave out tools not on this list.`);
-  }
-  return `INTEGRATION_${n.toUpperCase()}`;
+function sessionClient(s: Session): ApiClient {
+  return {
+    async fetch(pathname, init = {}) {
+      const go = () =>
+        fetch(`${s.apiBase}${pathname}`, {
+          ...init,
+          headers: { ...(init.headers ?? {}), Authorization: `Bearer ${s.accessToken}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+      let res = await go();
+      if (res.status === 401 && s.refreshToken) {
+        const r = await postForm(`${s.authBase}${OAUTH_TOKEN_PATH}`, {
+          grant_type: 'refresh_token',
+          refresh_token: s.refreshToken,
+          client_id: s.clientId,
+        });
+        if (r.status === 200 && r.json.access_token) {
+          s.accessToken = r.json.access_token;
+          if (r.json.refresh_token) s.refreshToken = r.json.refresh_token;
+          saveSession(s);
+          res = await go();
+        }
+      }
+      return res;
+    },
+  };
 }
 
 async function runReport(options: WizardOptions, args: string[], integrations: string[]): Promise<number> {
   const [step, status] = args;
-  if (!STEPS.includes(step as any) || step === 'verify') {
-    throw new UsageError(`Unknown step "${step ?? ''}". Use one of: ${STEPS.filter((x) => x !== 'verify').join(', ')}`);
+  if (!CHECKLIST_STEPS.includes(step as ChecklistStep)) {
+    throw new UsageError(`Unknown step "${step ?? ''}". Use one of: ${CHECKLIST_STEPS.join(', ')}`);
   }
-  if (!STATUSES.includes(status as any)) {
-    throw new UsageError(`Unknown status "${status ?? ''}". Use one of: ${STATUSES.join(', ')}`);
+  if (!CHECKLIST_STATUSES.includes(status as ChecklistStatus)) {
+    throw new UsageError(`Unknown status "${status ?? ''}". Use one of: ${CHECKLIST_STATUSES.join(', ')}`);
   }
   if (integrations.length > 0 && step !== 'integrations') {
     throw new UsageError('--integration only applies to the integrations step.');
   }
-  const s = loadSession(options.region);
-  const body: Record<string, unknown> = {
-    step: `INSTALL_STEP_${step.toUpperCase()}`,
-    status: `INSTALL_STEP_STATUS_${status.toUpperCase()}`,
-  };
-  if (integrations.length > 0) body.integrations = integrations.map(parseIntegration);
-  const res = await apiFetch(s, CHECKLIST_PATH, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    console.log(`Report not saved (${res.status}). Carry on with the install.`);
+  const names = integrations.map((i) => i.trim().toLowerCase());
+  const unknown = names.filter((n) => !CHECKLIST_INTEGRATIONS.includes(n));
+  if (unknown.length > 0) {
+    throw new UsageError(
+      `Unknown integration "${unknown[0]}". Use one of: ${CHECKLIST_INTEGRATIONS.join(', ')}. Leave out tools not on this list.`,
+    );
+  }
+  const code = await reportStep(sessionClient(loadSession(options.region)), step as ChecklistStep, status as ChecklistStatus, names);
+  if (code < 200 || code >= 300) {
+    console.log(`Report not saved (${code || 'no response'}). Carry on with the install.`);
     return 1;
   }
   console.log(`Reported ${step}: ${status}.`);
@@ -215,33 +209,20 @@ async function runReport(options: WizardOptions, args: string[], integrations: s
 }
 
 async function runWaitFirstEvent(options: WizardOptions, timeoutSec: number): Promise<number> {
-  const s = loadSession(options.region);
-  const deadline = Date.now() + timeoutSec * 1000;
-  while (Date.now() < deadline) {
-    const res = await apiFetch(s, FIRST_EVENT_PATH);
-    if (res.ok) {
-      const body = (await res.json()) as { received?: boolean };
-      if (body.received) { console.log('First session received.'); return 0; }
-    } else if (res.status === 401 || res.status === 403) {
-      console.log(`Can't check for sessions (${res.status}). Ask the user to confirm in the browser.`);
-      return 1;
-    }
-    await sleep(5000);
+  const outcome = await waitForFirstEvent(sessionClient(loadSession(options.region)), timeoutSec * 1000);
+  if (outcome === 'received') { console.log('First session received.'); return 0; }
+  if (outcome === 'unauthorized') {
+    console.log("Can't check for sessions. Ask the user to confirm in the browser.");
+    return 1;
   }
   console.log(`No session yet after ${timeoutSec}s.`);
   return 1;
 }
 
 async function runChecklist(options: WizardOptions): Promise<number> {
-  const s = loadSession(options.region);
-  const res = await apiFetch(s, CHECKLIST_PATH);
-  if (!res.ok) { console.log(`Couldn't read the checklist (${res.status}).`); return 1; }
-  const body = (await res.json()) as { steps?: { step: string; status?: string }[] };
-  for (const st of body.steps ?? []) {
-    const name = st.step.replace('INSTALL_STEP_', '').toLowerCase();
-    const status = (st.status ?? 'INSTALL_STEP_STATUS_UNSPECIFIED').replace('INSTALL_STEP_STATUS_', '').toLowerCase();
-    console.log(`${name}: ${status === 'unspecified' ? 'not started' : status}`);
-  }
+  const rows = await getChecklist(sessionClient(loadSession(options.region)));
+  if (!rows) { console.log("Couldn't read the checklist."); return 1; }
+  for (const r of rows) console.log(`${r.step}: ${r.status}`);
   return 0;
 }
 
