@@ -45,6 +45,8 @@ const DEV_HOST_OVERRIDES = [
   'SUBTEXT_API_BASE_URL',
   'SUBTEXT_APP_BASE_URL',
   'SUBTEXT_TELEMETRY_URL',
+  'SUBTEXT_CAPTURE_HOST',
+  'SUBTEXT_CAPTURE_SCRIPT',
 ] as const;
 
 type DevHostOverride = (typeof DEV_HOST_OVERRIDES)[number];
@@ -103,8 +105,24 @@ export function appBaseUrl(region: Region): string {
   );
 }
 
-/** Capture hosts baked into the snippet, realm-aware. */
+/** The org's Subtext settings overview, where the install checklist shows progress. */
+export function settingsOverviewUrl(region: Region, orgId: string): string {
+  return `${appBaseUrl(region)}/ui/${encodeURIComponent(orgId)}/settings/overview`;
+}
+
+/**
+ * Capture hosts baked into the snippet, realm-aware. A dev stack captures to
+ * its own hosts; without this a local org's sessions go to production and the
+ * first-session check never fires. Derived from the API override (api.X →
+ * X and edge.X/s/fs.js), which matches the local stack's layout, unless set
+ * explicitly.
+ */
 export function captureHosts(region: Region): { host: string; script: string } {
+  const apiOverride = devHostOverride('SUBTEXT_API_BASE_URL');
+  const devHost = apiOverride ? new URL(apiOverride).host.replace(/^api\./, '') : undefined;
+  const host = devHostOverride('SUBTEXT_CAPTURE_HOST') ?? devHost;
+  const script = devHostOverride('SUBTEXT_CAPTURE_SCRIPT') ?? (devHost ? `edge.${devHost}/s/fs.js` : undefined);
+  if (host && script) return { host, script };
   return region === 'eu'
     ? { host: 'eu1.fullstory.com', script: 'edge.eu1.fullstory.com/s/fs.js' }
     : { host: 'fullstory.com', script: 'edge.fullstory.com/s/fs.js' };
