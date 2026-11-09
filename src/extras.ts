@@ -2,22 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { sanitizeTerminalOutput } from './agents/helpers.js';
 import type { IntegrationSelection } from './integrations.js';
 import { readableNoteBody } from './logo.js';
+import { filesChanged, type StepResult, type StepResults } from './steps.js';
 
 /**
  * The optional extras pass (identify users, link analytics, mask PII): the
- * cheap package.json pre-check that scopes the agent run, and the summary the
- * wizard prints from the agent's structured result instead of ending on raw
- * agent output.
+ * cheap package.json pre-check that scopes the agent runs, and the summary the
+ * wizard prints from each step's result instead of ending on raw agent output.
  */
 
 /** Where headless runs leave their reports, relative to the project. */
 export const SUBTEXT_DIR = '.subtext';
-export const SETUP_REPORT = `${SUBTEXT_DIR}/setup-report.md`;
-export const EXTRAS_REPORT = `${SUBTEXT_DIR}/extras-report.md`;
-export const EXTRAS_RESULT = `${SUBTEXT_DIR}/extras-result.json`;
 
 const AUTH_PACKAGES: Array<[string, string[]]> = [
   ['NextAuth / Auth.js', ['next-auth', '@auth/core', '@auth/nextjs', '@auth/sveltekit']],
@@ -73,77 +69,30 @@ export function showExtrasPlan(scope: ExtrasScope): void {
   p.note(readableNoteBody(rows.join('\n')), 'Optional extras');
 }
 
-type Status = 'done' | 'skipped' | 'failed';
-
-interface ResultItem {
-  status: Status;
-  detail: string;
-}
-
-export interface ExtrasResults {
-  identity?: ResultItem;
-  analytics?: ResultItem;
-  masking?: ResultItem;
-  filesChanged: string[];
-}
-
-/**
- * The JSON the agent writes at the end of a headless extras run, or undefined
- * if it's missing, stale (from an earlier run), or malformed. Agent-written,
- * so every field is checked and every string is sanitized before display.
- */
-export function readExtrasResults(dir: string, since: number): ExtrasResults | undefined {
-  const file = path.join(dir, EXTRAS_RESULT);
-  try {
-    if (fs.statSync(file).mtimeMs < since) return undefined;
-    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
-    const files = Array.isArray(raw.files_changed) ? raw.files_changed : [];
-    return {
-      identity: resultItem(raw.identity),
-      analytics: resultItem(raw.analytics),
-      masking: resultItem(raw.masking),
-      filesChanged: files.filter((f): f is string => typeof f === 'string').slice(0, 50).map(clean),
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-function resultItem(value: unknown): ResultItem | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const { status, detail } = value as { status?: unknown; detail?: unknown };
-  if (status !== 'done' && status !== 'skipped' && status !== 'failed') return undefined;
-  return { status, detail: typeof detail === 'string' ? clean(detail) : '' };
-}
-
-function clean(text: string): string {
-  const line = sanitizeTerminalOutput(text).replace(/\s+/g, ' ').trim();
-  return line.length > 90 ? `${line.slice(0, 89)}…` : line;
-}
-
 const LABEL_WIDTH = 11;
 
 function row(label: string, text: string): string {
   return `${pc.bold(label.padEnd(LABEL_WIDTH))}${text}`;
 }
 
-function statusRow(label: string, item: ResultItem | undefined): string {
+function statusRow(label: string, item: StepResult | undefined): string {
   if (!item) return `${pc.dim('?')} ${row(label, pc.dim('not reported'))}`;
   const mark = item.status === 'done' ? pc.green('✔') : item.status === 'failed' ? pc.yellow('!') : pc.dim('–');
   const text = item.status === 'done' ? item.detail || 'done' : `${item.status}${item.detail ? `: ${item.detail}` : ''}`;
   return `${mark} ${row(label, item.status === 'done' ? text : pc.dim(text))}`;
 }
 
-export function showExtrasResults(results: ExtrasResults): void {
+export function showExtrasResults(results: StepResults): void {
   const rows = [
     `${pc.green('✔')} ${row('Snippet', 'installed')}`,
-    statusRow('Identity', results.identity),
-    statusRow('Analytics', results.analytics),
-    statusRow('Masking', results.masking),
+    statusRow('Identity', results.identify),
+    statusRow('Analytics', results.integrations),
+    statusRow('Masking', results.privacy),
   ];
-  if (results.filesChanged.length > 0) {
-    const shown = results.filesChanged.slice(0, 5).join(', ');
-    const more = results.filesChanged.length > 5 ? ` +${results.filesChanged.length - 5} more` : '';
+  const changed = filesChanged(results);
+  if (changed.length > 0) {
+    const shown = changed.slice(0, 5).join(', ');
+    const more = changed.length > 5 ? ` +${changed.length - 5} more` : '';
     rows.push('', pc.dim(`Changed: ${shown}${more}`));
   }
   p.note(readableNoteBody(rows.join('\n')), 'Results');

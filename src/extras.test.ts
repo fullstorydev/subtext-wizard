@@ -7,8 +7,9 @@ import { clackStub } from './test/helpers.js';
 const clack = clackStub();
 vi.mock('@clack/prompts', () => clack);
 
-const { EXTRAS_RESULT, detectAuthLibraries, readExtrasResults } = await import('./extras.js');
-const { buildEnrichPrompt } = await import('./prompt/build.js');
+const { detectAuthLibraries } = await import('./extras.js');
+const { readStepResult } = await import('./steps.js');
+const { EXTRAS_STEPS, INSTALL_STEPS, buildJoinedPrompt, buildStepPrompt, resultFile } = await import('./prompt/build.js');
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -36,65 +37,71 @@ describe('detectAuthLibraries', () => {
   });
 });
 
-describe('readExtrasResults', () => {
-  const result = (body: unknown) => tmp({ [EXTRAS_RESULT]: JSON.stringify(body) });
+describe('readStepResult', () => {
+  const file = resultFile('identify');
+  const result = (body: unknown) => tmp({ [file]: JSON.stringify(body) });
 
   it('reads a well-formed result', () => {
-    const dir = result({
-      identity: { status: 'done', detail: 'setIdentity in app/providers.tsx' },
-      analytics: { status: 'skipped', detail: 'no analytics SDK installed' },
-      masking: { status: 'done', detail: '4 fields masked' },
-      files_changed: ['app/providers.tsx'],
-    });
-    expect(readExtrasResults(dir, 0)).toEqual({
-      identity: { status: 'done', detail: 'setIdentity in app/providers.tsx' },
-      analytics: { status: 'skipped', detail: 'no analytics SDK installed' },
-      masking: { status: 'done', detail: '4 fields masked' },
+    const dir = result({ status: 'done', detail: 'setIdentity in app/providers.tsx', files_changed: ['app/providers.tsx'] });
+    expect(readStepResult(dir, 'identify', 0)).toEqual({
+      status: 'done',
+      detail: 'setIdentity in app/providers.tsx',
       filesChanged: ['app/providers.tsx'],
     });
   });
 
   it('ignores a result left over from an earlier run', () => {
-    const dir = result({ identity: { status: 'done' }, files_changed: [] });
-    expect(readExtrasResults(dir, Date.now() + 60_000)).toBeUndefined();
+    const dir = result({ status: 'done', files_changed: [] });
+    expect(readStepResult(dir, 'identify', Date.now() + 60_000)).toBeUndefined();
   });
 
-  it('drops invalid fields and strips terminal escapes from agent text', () => {
-    const dir = result({
-      identity: { status: 'hacked', detail: 'x' },
-      masking: { status: 'done', detail: '\u001b[2Jcleared\nscreen' },
-      files_changed: ['a.ts', 42],
-    });
-    const parsed = readExtrasResults(dir, 0);
-    expect(parsed?.identity).toBeUndefined();
-    expect(parsed?.masking?.detail).not.toContain('\u001b');
-    expect(parsed?.masking?.detail).not.toContain('\n');
+  it('rejects an unknown status and strips terminal escapes from agent text', () => {
+    expect(readStepResult(result({ status: 'hacked' }), 'identify', 0)).toBeUndefined();
+    const parsed = readStepResult(result({ status: 'done', detail: '\u001b[2Jcleared\nscreen', files_changed: ['a.ts', 42] }), 'identify', 0);
+    expect(parsed?.detail).not.toContain('\u001b');
+    expect(parsed?.detail).not.toContain('\n');
     expect(parsed?.filesChanged).toEqual(['a.ts']);
   });
 
   it('returns undefined for malformed JSON', () => {
-    expect(readExtrasResults(tmp({ [EXTRAS_RESULT]: '{ nope' }), 0)).toBeUndefined();
+    expect(readStepResult(tmp({ [file]: '{ nope' }), 'identify', 0)).toBeUndefined();
   });
 });
 
-describe('buildEnrichPrompt scope', () => {
+describe('prompts', () => {
   const none = { integrations: [], other: [] };
 
-  it('narrows identity and analytics when the pre-check found nothing', () => {
-    const prompt = buildEnrichPrompt({ selection: none, authLibraries: [], mode: 'headless', telemetry: 'none' });
+  it('a step prompt carries one step and asks for that step\'s result file', () => {
+    const prompt = buildStepPrompt('identify', { selection: none, authLibraries: [] });
+    expect(prompt).toContain('# Identify users');
+    expect(prompt).not.toContain('# Mask sensitive data');
+    expect(prompt).toContain(resultFile('identify'));
     expect(prompt).toContain('found no known auth library');
-    expect(prompt).toContain('skip Step 5 and record it as skipped');
-    expect(prompt).toContain(EXTRAS_RESULT);
-    expect(prompt).toContain('Do not mention MCP servers');
   });
 
   it('points identity at the detected library', () => {
-    const prompt = buildEnrichPrompt({ selection: none, authLibraries: ['Clerk'], mode: 'headless', telemetry: 'none' });
-    expect(prompt).toContain('found Clerk in `package.json`');
+    expect(buildStepPrompt('identify', { authLibraries: ['Clerk'] })).toContain('found Clerk in `package.json`');
   });
 
-  it('only asks for the result file in headless runs', () => {
-    const prompt = buildEnrichPrompt({ selection: none, authLibraries: [], mode: 'interactive', telemetry: 'none' });
-    expect(prompt).not.toContain(EXTRAS_RESULT);
+  it('fills the org snippet into the capture step', () => {
+    const prompt = buildStepPrompt('capture', { snippet: '<script>ORG_SNIPPET</script>' });
+    expect(prompt).toContain('ORG_SNIPPET');
+    expect(prompt).not.toMatch(/\{\{[A-Z_]+\}\}/);
+  });
+
+  it('joined interactive prompts have every step and no result file', () => {
+    const prompt = buildJoinedPrompt(EXTRAS_STEPS, { selection: none }, 'interactive');
+    for (const heading of ['# Identify users', '# Link sessions into existing tools', '# Mask sensitive data']) {
+      expect(prompt).toContain(heading);
+    }
+    expect(prompt).not.toContain('.subtext/results');
+  });
+
+  it('no step file links to the next page', () => {
+    for (const step of INSTALL_STEPS) {
+      const prompt = buildStepPrompt(step, { snippet: '<script></script>' });
+      expect(prompt).not.toMatch(/^## Next/m);
+      expect(prompt).not.toMatch(/install\/[a-z-]+\.txt/);
+    }
   });
 });

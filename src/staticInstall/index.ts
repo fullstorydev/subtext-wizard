@@ -66,6 +66,17 @@ export function planStaticInstall(dir: string, snippetHtml: string): StaticPlan 
   }
 }
 
+/** Where a Content-Security-Policy is configured, if anywhere we know to look. */
+export function detectCsp(dir: string): string | undefined {
+  try {
+    const project = readProject(dir);
+    const detection = detectFramework(project);
+    return findCsp(project, detection.ok ? detection.plan.file : 'index.html');
+  } catch {
+    return undefined;
+  }
+}
+
 /** Inner JS of the fetched `<script>…</script>` snippet. */
 function snippetBody(snippetHtml: string): string | undefined {
   const match = /^\s*<script[^>]*>\s*([\s\S]*?)\s*<\/script>\s*$/i.exec(snippetHtml);

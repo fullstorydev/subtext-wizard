@@ -1,5 +1,3 @@
-import type { StepMarker } from './telemetry-marker.js';
-
 export type AgentKind = 'terminal' | 'app';
 
 export interface DetectedAgent {
@@ -27,10 +25,6 @@ export interface LaunchContext {
   /** What this run is for, for the progress line ("Installing the snippet"). */
   label?: string;
   onEvent?: (event: string, properties?: Record<string, unknown>) => void;
-  /** Per-step telemetry the wizard parses out of the terminal agent's stdout
-   * (see telemetry-marker.ts). The agent never holds a credential — it only
-   * prints markers; the wizard sends the events with its own token. */
-  onTelemetry?: (marker: StepMarker) => void;
 }
 
 export interface LaunchResult {

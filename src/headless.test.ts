@@ -72,8 +72,8 @@ describe('runHeadless', () => {
       agent: 'external',
     });
     const prompt = fs.readFileSync(path.join(dir, AGENT_PROMPT), 'utf8');
-    expect(prompt).toContain('# Task: identity, analytics, and privacy');
-    expect(prompt).not.toContain('Part 1');
+    expect(prompt).toContain('# Identify users');
+    expect(prompt).not.toContain('# Install the capture snippet');
   }, 10_000);
 
   it('--external-agent hands the snippet install to the agent when it cannot be done statically', async () => {
@@ -84,8 +84,45 @@ describe('runHeadless', () => {
     expect(code).toBe(0);
     expect(readResult(dir).snippet.status).toBe('pending');
     const prompt = fs.readFileSync(path.join(dir, AGENT_PROMPT), 'utf8');
-    expect(prompt).toContain('# Part 1: install the capture snippet');
-    expect(prompt).toContain('# Part 2: identity, analytics, and privacy');
+    expect(prompt).toContain('# Install the capture snippet');
+    expect(prompt).toContain('# Identify users');
+  }, 10_000);
+
+  it('runs a fresh agent per extras step and collects each result', async () => {
+    const dir = viteProject();
+    const prompts: string[] = [];
+    agents.push({
+      definition: {
+        id: 'fake',
+        name: 'Fake CLI',
+        kind: 'terminal',
+        detect: async () => null,
+        launch: async ({ prompt, cwd }) => {
+          prompts.push(prompt);
+          const file = /\.subtext\/results\/([a-z]+)\.json/.exec(prompt)![0];
+          fs.mkdirSync(path.join(cwd, '.subtext/results'), { recursive: true });
+          fs.writeFileSync(path.join(cwd, file), JSON.stringify({ status: 'done', detail: 'ok', files_changed: ['src/app.tsx'] }));
+          return { mode: 'ran', exitCode: 0 };
+        },
+      },
+    });
+    const code = await runHeadless(makeOptions({ headless: true, mock: true, dir }));
+
+    expect(code).toBe(0);
+    expect(prompts.map((p) => /^# .+$/m.exec(p.split('---').pop()!)?.[0])).toEqual([
+      '# Identify users',
+      '# Link sessions into existing tools',
+      '# Mask sensitive data',
+    ]);
+    expect(readResult(dir).extras).toEqual({
+      status: 'done',
+      results: {
+        identify: { status: 'done', detail: 'ok' },
+        integrations: { status: 'done', detail: 'ok' },
+        privacy: { status: 'done', detail: 'ok' },
+      },
+      files_changed: ['src/app.tsx'],
+    });
   }, 10_000);
 
   it('--org needs no credential', async () => {
