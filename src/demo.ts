@@ -104,7 +104,27 @@ async function pollInBox(
     }
   }
 
-  const restoreCursor = () => out.write('\x1b[?25h');
+  // Raw mode so typed keys aren't echoed into the frame; an echoed Enter adds a
+  // line and the cursor-up redraw would then land one row off. Raw mode also
+  // swallows SIGINT, so Ctrl+C is caught as a byte here instead.
+  const stdin = process.stdin;
+  const canRaw = stdin.isTTY && typeof stdin.setRawMode === 'function';
+  const onKey = (data: Buffer) => {
+    if (data.includes(0x03)) controller.abort();
+  };
+  if (canRaw) {
+    stdin.setRawMode(true);
+    stdin.on('data', onKey);
+    stdin.resume();
+  }
+  const restoreCursor = () => {
+    out.write('\x1b[?25h');
+    if (canRaw) {
+      stdin.removeListener('data', onKey);
+      stdin.setRawMode(false);
+      stdin.pause();
+    }
+  };
   process.once('exit', restoreCursor);
   const started = Date.now();
   let frame = 0;
