@@ -1,89 +1,68 @@
-## Step 1: Pre-check
+## Step 1: Check it isn't already installed
 
-Determine whether the capture snippet is *actually* installed. The snippet is the code that loads and initializes session capture — not helper utilities, type declarations, or UI text that mentions "Fullstory."
+Search the HTML entry point for `fullstory.com/s/fs.js` or `_fs_script`, and source files for `window['_fs_org'] =` or `init({ orgId`. Also check `package.json` for `@fullstory/browser`, `@fullstory/react-native`, or `@fullstory/snippet`. Don't broad-search for "fullstory"; it matches unrelated copy.
 
-Run these checks in order. Stop at the first positive match.
-
-1. Package dependencies (highest confidence) — Read `package.json`. Look for `@fullstory/browser`, `@fullstory/react-native`, or `@fullstory/snippet` in `dependencies` or `devDependencies`.
-2. Script tag in HTML entry point — Search ONLY the HTML entry point (`index.html`, `app/layout.tsx`, `pages/_document.tsx`, or framework equivalent) for the literal strings `fullstory.com/s/fs.js` or `_fs_script`. Do not search other files.
-3. SDK initialization call — Grep for `init\(\s*\{\s*orgId`, `window\['_fs_org'\]\s*=`, or `window\._fs_org\s*=` in `.ts`, `.tsx`, `.js`, `.jsx` files (exclude `node_modules`, test files, and `*.d.ts`). The `init()` call comes from `@fullstory/browser` v2: `import { init } from '@fullstory/browser'`.
-
-These are NOT the snippet and MUST be ignored:
-
-- `https://subtext.fullstory.com`, `https://www.fullstory.com` — URLs in copy or config. Ignore.
-- Footer text, marketing copy mentioning "Fullstory" — UI text. Ignore.
-- `declare global { interface Window { FS?: ... } }` — Type declarations. Ignore.
-- `window.FS(...)` helpers in `/lib/`, `/utils/` — Consumers of the snippet. Ignore.
-- `addEventListener('fullstory:dataLayerChange', ...)` — Event listeners. Ignore.
-- `import { waitForSession } from '@/lib/fullstory'` — Wrapper modules. Ignore.
-
-Do NOT broad-grep for "fullstory" or "Fullstory" — it produces false positives. Only search for the exact patterns above.
-
-If a genuine snippet is found, report "Subtext snippet already installed at {file}:{line}" and stop.
+If found, report "Subtext snippet already installed at {file}:{line}" and stop.
 
 ## Step 2: Explore the codebase
 
-Before making any changes, do a read-only pass to gather what the install will depend on. Only use data that is already available on the client — do NOT add server calls, API fetches, or new data loading to support Subtext. Work with what the app already has.
+Read-only. Find two things:
 
-### Framework
+- **Framework and entry point.** Match the project to one of the framework guides in Step 4.
+- **Content-Security-Policy.** Look for a CSP in framework config (`next.config.js`, `vercel.json`, `netlify.toml`), middleware (`helmet`, `middleware.ts`), or a `<meta http-equiv="Content-Security-Policy">` tag. A CSP that blocks the snippet makes capture fail silently.
 
-Read `package.json` and project structure to detect the framework:
-
-- `next` in dependencies → Next.js (App Router) → `app/layout.tsx`
-- `next` + `pages/_document.tsx` exists → Next.js (Pages Router) → `pages/_document.tsx`
-- `@remix-run/*` in dependencies → Remix → `app/root.tsx`
-- `vite` in devDependencies → Vite → `index.html`
-- `react-scripts` in dependencies → Create React App → `public/index.html`
-- `react-native` in dependencies → React Native → App entry point
-- None of the above → Plain HTML → `index.html` (search for `<head>` if missing)
-
-If nothing matches and no `index.html` exists, search `.html`, `.tsx`, `.jsx` files for `<head>` tags, present the candidates, and ask me which file to use.
-
-### Content Security Policy
-
-Search for any `Content-Security-Policy` header set in middleware, server config, framework config (e.g. `next.config.js`, `vercel.json`, `netlify.toml`), or a `<meta http-equiv="Content-Security-Policy">` tag in HTML. If one exists, note the directive changes that will be needed:
-
-- `script-src` — add `https://edge.fullstory.com` and `https://rs.fullstory.com`. The snippet runs an inline bootstrap, so `'unsafe-inline'` or a nonce on the snippet `<script>` is also required.
-- `connect-src` — add `https://edge.fullstory.com` and `https://rs.fullstory.com`.
-- `img-src` — add `https://rs.fullstory.com`.
-- For EU-hosted orgs, substitute the EU equivalents: `https://edge.eu1.fullstory.com` and `https://rs.eu1.fullstory.com` (and `https://rs.eu1.fullstory.com` for `img-src`).
-
-If no CSP is configured, no changes needed — note that in the plan.
+If nothing matches and there's no `index.html`, search `.html`, `.tsx`, and `.jsx` files for `<head>`, list the candidates, and ask which file to use.
 
 ## Step 3: Present plan{{PLAN_GATE}}
 
-Before changing any code, put together a single plan that covers everything below. For each item, name the specific file path and show enough surrounding code context that placement can be verified.
+Before changing any code, write one plan that names the file and shows enough surrounding code to check placement:
 
-1. **Snippet placement** — which file, which insertion point in the component tree or HTML head.
-2. **CSP changes** — directive-by-directive list, or "none needed."
-3. **Open questions** — anything framework-specific, ambiguous, or places where you couldn't find what Step 2 was looking for.
+1. **Snippet placement**: which file, and where in `<head>`.
+2. **CSP changes**: directive by directive, or "none needed".
+3. **Open questions**: anything ambiguous.
 
 {{PLAN_GATE_DETAIL}}
 
 ## Step 4: Install the snippet
 
-This is the snippet to install. It is specific to this organization — install it exactly as given, do not alter the org id, host, or script values:
+This snippet is specific to this org. Copy it exactly; don't change the org id, host, or script values:
 
 ```html
 {{SNIPPET}}
 ```
 
-1. Insert the snippet at the location confirmed in the plan.
-2. Verify syntactic correctness in context — no broken imports, valid JSX, matched tags.
-3. If the plan included CSP changes, apply them now.
+Place it as early in `<head>` as possible, before the app bundle, and check the file still compiles.
 
-### Framework patterns
+### Framework guides
 
-- Next.js (App Router) — Add to `app/layout.tsx` inside `<head>`, or as a `<Script>` component with `dangerouslySetInnerHTML`.
-- Next.js (Pages Router) — Add to `pages/_document.tsx` inside `<Head>`.
-- Remix — Add to `app/root.tsx` inside `<head>` of the root layout.
-- Vite / CRA / Plain HTML — Add the `<script>` tag to `index.html` inside `<head>`.
-- React Native — Install `@fullstory/react-native`, then add `init({ orgId: '<ORG_ID>' })` to the app entry point.
+- **Next.js App Router** (`app/layout.tsx`): put it inside `<head>` as `<script dangerouslySetInnerHTML={{ __html: `...` }} />`, or in the body as `<Script id="subtext-snippet" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: `...` }} />` from `next/script`. The layout doesn't need `"use client"`. Don't split the snippet across `<Script>` tags.
+- **Next.js Pages Router** (`pages/_document.tsx`): put it inside `<Head>` as a `<script dangerouslySetInnerHTML>`. It must live in `_document.tsx`, not `_app.tsx`.
+- **Remix** (`app/root.tsx`): put it inside `<head>` as a `<script dangerouslySetInnerHTML>`, before `<Scripts />`.
+- **Vite** (`index.html`): put the `<script>` inside `<head>`, before `<script type="module" src="/src/main.tsx">`.
+- **Create React App** (`public/index.html`): put the `<script>` inside `<head>`. Don't import it from a JS module.
+- **React Native**: there's no HTML snippet. Install `@fullstory/react-native` (plus the platform link step from its README: pod install on iOS, Gradle config on Android) and call `init({ orgId: '<ORG_ID>' })` once at the app entry point, before any screen renders. Use the org id from the snippet above. If the project keeps config in env vars (`EXPO_PUBLIC_*`, `react-native-config`), follow that convention. No CSP changes are needed.
+- **Anything else** (plain HTML): put the `<script>` inside `<head>`. With several HTML entry points, add it to every page that should be recorded; a shared header template is easier than copying it.
+
+### Content-Security-Policy
+
+If Step 2 found a CSP, add these sources to it, editing the policy where it's defined. Keep every existing source.
+
+US orgs (`-na1`):
+
+- `script-src`: `https://edge.fullstory.com https://rs.fullstory.com`
+- `connect-src`: `https://edge.fullstory.com https://rs.fullstory.com`
+- `img-src`: `https://rs.fullstory.com`
+
+EU orgs (`-eu1`): use `edge.eu1.fullstory.com` and `rs.eu1.fullstory.com` instead.
+
+The snippet starts with an inline script, so `script-src` also needs `'unsafe-inline'` or a nonce on the snippet's `<script>` tag. If the app already uses nonces, use the same mechanism. Don't add `'unsafe-inline'` to a policy that doesn't already have it without asking the user.
+
+If the policy is set in a hosting dashboard you can't edit, tell the user exactly which directives to change.
 
 ## Step 5: Explain
 
 Once the snippet is in place, {{EXPLAIN_VERB}}:
 
-"The Subtext capture snippet is installed. Once deployed, sessions will start capturing on your next page load — DOM snapshots, clicks, scrolls, network requests, and console output."
+"The Subtext capture snippet is installed. Once deployed, sessions will start capturing on your next page load: DOM snapshots, clicks, scrolls, network requests, and console output."
 
-This install covered snippet capture only. Identifying users, linking the session URL into your analytics tools, and masking sensitive data are a separate follow-up step — the Subtext setup wizard will offer it next.
+This install covered the snippet only. Identifying users, linking the session URL into analytics tools, and masking sensitive data come next; the Subtext setup wizard will offer them.
