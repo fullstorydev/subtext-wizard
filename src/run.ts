@@ -279,7 +279,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, onEvent);
       await showDemoGuide({
         agentName: 'your coding agent',
-        installPending: !snippetInstalled,
+        installPending: agentWork,
         clipboardHoldsInstallPrompt: copied,
         yes: options.yes,
         onEvent,
@@ -295,7 +295,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
           onEvent,
         });
       }
-      p.outro(snippetInstalled ? DEPLOY_OUTRO : 'Run this installer again any time with: npx @subtextdev/subtext-wizard');
+      p.outro(agentWork ? 'Run this installer again any time with: npx @subtextdev/subtext-wizard' : DEPLOY_OUTRO);
       await telemetry.flush();
       return 0;
     }
@@ -333,7 +333,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       if (agentWork && result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
       await showDemoGuide({
         agentName: chosen.definition.name,
-        installPending: !snippetInstalled,
+        installPending: agentWork,
         clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
         // Suppressed under --print-prompt so the demo's "Open agent?" offer
@@ -354,9 +354,9 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         });
       }
       p.outro(
-        snippetInstalled
-          ? DEPLOY_OUTRO
-          : 'Finish the install in your agent — it will guide you from here.',
+        agentWork
+          ? 'Finish the install in your agent — it will guide you from here.'
+          : DEPLOY_OUTRO,
       );
       await telemetry.flush();
       return 0;

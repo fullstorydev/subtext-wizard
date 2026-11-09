@@ -151,8 +151,9 @@ describe('runHeadless', () => {
   it('only counts a capture the agent reports as done', async () => {
     const dir = viteProject();
     fs.writeFileSync(path.join(dir, 'index.html'), '<html><body>no head</body></html>');
-    fakeAgent((step) => (step === 'capture' ? { status: 'skipped', detail: 'no place for it' } : undefined));
+    const prompts = fakeAgent((step) => (step === 'capture' ? { status: 'skipped', detail: 'no place for it' } : undefined));
     expect(await runHeadless(makeOptions({ headless: true, mock: true, dir }))).toBe(1);
+    expect(prompts).toHaveLength(1);
     expect(readResult(dir).snippet).toEqual({ status: 'failed', reason: 'no place for it' });
   }, 10_000);
 

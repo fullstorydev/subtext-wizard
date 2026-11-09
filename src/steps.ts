@@ -94,8 +94,8 @@ export async function runSteps(runner: StepRunner, steps: InstallStep[], ctx: St
     const result = readStepResult(runner.dir, step) ?? fallbackResult(run);
     if (result.status !== 'done' && run.finalMessage) p.log.message(pc.dim(run.finalMessage));
     results[step] = result;
-    // A failed snippet install means nothing after it can work.
-    if (step === 'capture' && result.status === 'failed') break;
+    // Without the snippet in, nothing after it can work.
+    if (step === 'capture' && result.status !== 'done') break;
   }
   return results;
 }
