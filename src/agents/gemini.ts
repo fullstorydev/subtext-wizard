@@ -1,7 +1,7 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { runTerminalAgent, which } from './helpers.js';
-import { makeMarkerLineFilter } from './telemetry-marker.js';
+import { runTerminalAgent, sanitizeTerminalOutput, which } from './helpers.js';
+import { printAgentText } from './output.js';
 import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
 
 async function launch(ctx: LaunchContext): Promise<LaunchResult> {
@@ -11,16 +11,14 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   // -p runs non-interactively. --approval-mode auto_edit auto-approves file
   // edits only, NOT arbitrary shell commands — so an instruction injected via
   // repo/doc content ("run this command") can't reach a shell. (--yolo would
-  // auto-approve everything, including command execution.) We pipe stdout
-  // (rather than inherit) so the wizard can pull telemetry markers out of the
-  // stream; every other line is echoed through with the shared agent-output
-  // styling (pink gutter bar).
+  // auto-approve everything, including command execution.) stdout is piped so
+  // every line gets the shared agent-output styling.
   const exitCode = await runTerminalAgent({
     binaryPath: ctx.binaryPath!,
     args: ['--approval-mode', 'auto_edit', '-p', ctx.prompt],
     cwd: ctx.cwd,
     stdout: 'pipe',
-    onStdoutLine: makeMarkerLineFilter(ctx.onTelemetry),
+    onStdoutLine: (line) => printAgentText(sanitizeTerminalOutput(line)),
   });
   return { mode: 'ran', exitCode };
 }

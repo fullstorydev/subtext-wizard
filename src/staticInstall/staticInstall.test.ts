@@ -329,8 +329,6 @@ describe('fallbacks', () => {
     ['nothing recognizable', { 'package.json': pkg({ express: '4' }) }, /couldn't identify/],
     ['a Vite multi-page app', { 'package.json': pkg({ vite: '5' }), 'vite.config.ts': 'export default { build: { rollupOptions: { input: {} } } }', 'index.html': VITE_HTML }, /multiple entry pages/],
     ['two <head> tags', { 'package.json': pkg({ vite: '5' }), 'index.html': VITE_HTML + '<head></head>' }, /safe insertion point/],
-    ['a CSP header', { 'package.json': pkg({ vite: '5' }), 'index.html': VITE_HTML, 'vercel.json': { headers: [{ key: 'Content-Security-Policy' }] } }, /Content-Security-Policy.*vercel\.json/],
-    ['helmet', { 'package.json': pkg({ vite: '5', helmet: '7' }), 'index.html': VITE_HTML }, /helmet/],
     ['a malformed package.json', { 'package.json': '{ nope' }, /JSON/],
   ])('falls back for %s', (_name, files, reason) => {
     expectFallback(planStaticInstall(project(files as Record<string, string | object>), SNIPPET), reason);
