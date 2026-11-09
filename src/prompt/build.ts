@@ -56,8 +56,11 @@ function stepNotes(step: InstallStep, ctx: StepContext): string {
 function renderStep(step: InstallStep, ctx: StepContext): string {
   let body = template('steps', `${step}.md`);
   if (step === 'capture') {
-    if (!ctx.snippet) throw new Error('The capture step needs the org snippet.');
-    body = body.replace('{{SNIPPET}}', ctx.snippet);
+    const snippet = ctx.snippet;
+    if (!snippet) throw new Error('The capture step needs the org snippet.');
+    if (!body.includes('{{SNIPPET}}')) throw new Error('templates/steps/capture.md is missing {{SNIPPET}}.');
+    // A function, so `$&` and friends in the minified snippet aren't treated as patterns.
+    body = body.replace('{{SNIPPET}}', () => snippet);
   }
   return [body, stepNotes(step, ctx)].filter(Boolean).join('\n\n');
 }
@@ -71,7 +74,7 @@ export function buildStepPrompt(step: InstallStep, ctx: StepContext): string {
   return [
     template('preamble.md'),
     template('modes', 'autonomous.md'),
-    template('modes', 'result.md').replace('{{RESULT_FILE}}', resultFile(step)),
+    template('modes', 'result.md').replace('{{RESULT_FILE}}', () => resultFile(step)),
     '---',
     renderStep(step, ctx),
   ].join('\n\n') + '\n';

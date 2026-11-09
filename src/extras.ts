@@ -5,12 +5,12 @@ import { readableNoteBody } from './logo.js';
 import { filesChanged, type StepResult, type StepResults } from './steps.js';
 
 /**
- * The optional extras pass (identify users, link analytics, mask PII): the
- * analytics pre-check that scopes the agent runs, and the summary the
- * wizard prints from each step's result instead of ending on raw agent output.
+ * What the wizard shows around the optional extras (identify users, link
+ * analytics, mask PII): the plan before they run, and a summary built from
+ * each step's result instead of ending on raw agent output.
  */
 
-/** Where headless runs leave their reports, relative to the project. */
+/** Where runs leave install-result.json, agent-prompt.md, and results/<step>.json. */
 export const SUBTEXT_DIR = '.subtext';
 
 export interface ExtrasScope {

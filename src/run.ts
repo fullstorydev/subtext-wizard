@@ -1,8 +1,6 @@
 import * as p from '@clack/prompts';
 import clipboard from 'clipboardy';
-import fs from 'node:fs';
 import os from 'node:os';
-import path from 'node:path';
 import pc from 'picocolors';
 import { authenticate } from './auth.js';
 import { chooseAgent, detectAgents, MANUAL_CHOICE } from './agents/index.js';
@@ -33,6 +31,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
   // Set once an agent is chosen so a post-selection cancel/fail (thrown out of
   // scope of `chosen`) can still attach the harness the rest of the funnel uses.
   let selectedHarness: string | undefined;
+  // Once the wizard has written the snippet, a cancel can't claim nothing changed.
+  let snippetWritten = false;
 
   await showLogo();
   p.intro(`${pc.bgCyan(pc.black(' Subtext '))} setup ${pc.dim(`v${WIZARD_VERSION}`)}`);
@@ -107,9 +107,15 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const staticInstall = await runStaticInstall(snippet, options, onEvent);
     // After a static install the agent still checks for a CSP. An existing
     // snippet is the user's own setup, so it's left as is.
-    const snippetSteps: InstallStep[] =
-      staticInstall.status === 'fallback' ? SNIPPET_STEPS : staticInstall.status === 'installed' ? ['csp'] : [];
-    const snippetInstalled = snippetSteps.length === 0;
+    const snippetInstalled = staticInstall.status !== 'fallback';
+    snippetWritten = staticInstall.status === 'installed';
+    let snippetSteps: InstallStep[] = [];
+    if (staticInstall.status === 'fallback') snippetSteps = SNIPPET_STEPS;
+    else if (staticInstall.status === 'installed') snippetSteps = ['csp'];
+    // Whether there's agent work before the first session: the full install,
+    // or just the CSP check after the wizard wrote the snippet.
+    const agentWork = snippetSteps.length > 0;
+    const stepOneTitle = snippetInstalled ? 'Check the Content-Security-Policy' : 'Install the capture snippet';
 
     // 3. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
@@ -148,7 +154,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const snippetPrompt = isTerminalRun
       ? snippetSteps.map((step) => buildStepPrompt(step, { snippet })).join('\n\n---\n\n')
       : buildJoinedPrompt(snippetSteps, { snippet }, 'interactive');
-    if (!snippetInstalled) printPromptForTesting('STEP 1: capture snippet install prompt', snippetPrompt);
+    if (agentWork) printPromptForTesting(`STEP 1: ${stepOneTitle}`, snippetPrompt);
 
     // For terminal agents the install runs autonomously; name what it
     // auto-approves so the single pre-handoff gate below carries that consent
@@ -159,14 +165,14 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         ? (chosen.definition.autonomy ?? 'auto-accepting file edits')
         : 'auto-accepting file edits';
 
-    if (!snippetInstalled) p.log.step(pc.bold('Install the capture snippet'));
+    if (agentWork) p.log.step(pc.bold(stepOneTitle));
 
     // 6. Pre-handoff transparency AND consent in one gate: the user reads the
     //    exact prompt the agent will run, and proceeding is the authorization.
     //    For terminal runs the proceed option names the autonomous run, so no
     //    second confirm follows. --yes (CI) skips the gate, and there's nothing
     //    to hand off when the wizard already installed the snippet.
-    if (!options.yes && !snippetInstalled) {
+    if (!options.yes && agentWork) {
       const proceedLabel =
         chosen === MANUAL_CHOICE
           ? 'Continue'
@@ -250,8 +256,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     if (chosen === MANUAL_CHOICE) {
       sendStart('manual');
       let copied = false;
-      // Only the agent-driven install has a step-1 prompt to hand over.
-      if (!snippetInstalled) {
+      if (agentWork) {
         try {
           await clipboard.write(snippetPrompt);
           copied = true;
@@ -262,7 +267,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         if (copied) {
           p.log.success('The install prompt is on your clipboard.');
           p.note(
-            'Paste it into any coding agent opened at this project folder.\nThe agent will walk you through the snippet install step by step.',
+            `Paste it into any coding agent opened at this project folder.\nThe agent will walk you through ${snippetInstalled ? 'the CSP check' : 'the snippet install'} step by step.`,
             'Next step',
           );
         } else {
@@ -311,7 +316,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       // --print-prompt is a dry run: the prompt was already printed above, so
       // don't open the app / hand off — synthesize a clean handoff result.
       // Same when the snippet is already installed: there's nothing to hand off.
-      const result: LaunchResult = options.printPrompt || snippetInstalled
+      const result: LaunchResult = options.printPrompt || !agentWork
         ? { mode: 'handoff', exitCode: 0, clipboardHoldsPrompt: false }
         : await chosen.definition.launch({
             prompt: snippetPrompt,
@@ -325,7 +330,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
         mode: result.mode,
         exit_code: result.exitCode ?? null,
       });
-      if (!snippetInstalled && result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
+      if (agentWork && result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
       await showDemoGuide({
         agentName: chosen.definition.name,
         installPending: !snippetInstalled,
@@ -374,7 +379,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     };
 
     // Phase 1: install the snippet, unless the wizard already did.
-    const snippetResults: StepResults = snippetInstalled ? {} : await runSteps(runner, snippetSteps, { snippet });
+    const snippetResults: StepResults = agentWork ? await runSteps(runner, snippetSteps, { snippet }) : {};
     if (staticInstall.status === 'installed') {
       snippetResults.capture = { status: 'done', detail: '', filesChanged: [] };
     }
@@ -382,7 +387,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       harness,
       ...(staticInstall.status === 'installed' ? { framework: staticInstall.framework } : {}),
     });
-    const snippetFailed = snippetResults.capture?.status === 'failed';
+    // Only `done` means the snippet is in; a skipped or unreported capture isn't.
+    const snippetFailed = !snippetInstalled && !options.printPrompt && snippetResults.capture?.status !== 'done';
     telemetry.note('wizard_completed', { agent: harness, snippet: snippetResults.capture?.status ?? 'static' });
 
     if (snippetFailed) {
@@ -391,7 +397,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       telemetry.step('complete', 'fail', { harness });
       p.outro(
         pc.yellow(
-          `The snippet install didn't finish (${snippetResults.capture!.detail}). Review the output above; you can re-run this installer to try again.`,
+          `The snippet install didn't finish${snippetResults.capture?.detail ? ` (${snippetResults.capture.detail})` : ''}. Review the output above; you can re-run this installer to try again.`,
         ),
       );
       await telemetry.flush();
@@ -449,7 +455,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
             harness,
             analyticsProviders: scope.selection.integrations.map((i) => i.id),
           });
-          if (!options.printPrompt) showExtrasResults(extras);
+          if (options.printPrompt) extras = undefined;
+          else showExtrasResults(extras);
         }
       }
     } catch (error) {
@@ -472,7 +479,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     const harnessMeta = selectedHarness ? { harness: selectedHarness } : {};
     if (error instanceof CancelledError) {
       telemetry.finish('skipped', harnessMeta);
-      p.cancel('Setup cancelled — nothing was changed.');
+      p.cancel(snippetWritten ? 'Setup cancelled. The snippet the wizard added is still in place.' : 'Setup cancelled — nothing was changed.');
       await telemetry.flush();
       return 130;
     }

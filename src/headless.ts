@@ -33,10 +33,10 @@ type StepSummary = Omit<StepResult, 'filesChanged'>;
 
 interface InstallResult {
   snippet:
-    | { status: 'installed'; method: SnippetMethod; file?: string; framework?: string }
+    | { status: 'installed'; method: SnippetMethod; file?: string; framework?: string; note?: string }
     | { status: 'failed' | 'pending'; reason: string };
   extras:
-    | { status: 'done'; results: Partial<Record<InstallStep, StepSummary>>; files_changed: string[] }
+    | { status: 'done' | 'failed'; results: Partial<Record<InstallStep, StepSummary>>; files_changed: string[] }
     | { status: 'skipped' | 'pending'; reason: string };
   agent: string | null;
 }
@@ -84,7 +84,14 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
     //    the agent otherwise. Either way the agent then checks for a CSP.
     let snippetResult: InstallResult['snippet'];
     if (staticOutcome.status === 'installed') {
-      snippetResult = { status: 'installed', method: 'static', file: staticOutcome.file, framework: staticOutcome.framework };
+      snippetResult = {
+        status: 'installed',
+        method: 'static',
+        file: staticOutcome.file,
+        framework: staticOutcome.framework,
+        ...(runner ? {} : { note: 'Content-Security-Policy not checked: no coding agent CLI is available' }),
+      };
+      if (!runner) p.log.warn('No coding agent CLI is available, so the Content-Security-Policy was not checked.');
       const capture: StepResult = { status: 'done', detail: '', filesChanged: [] };
       const results = runner ? await runSteps(runner, ['csp'], ctx) : {};
       reportSteps(telemetry, { capture, ...results }, { harness, framework: staticOutcome.framework });
@@ -100,10 +107,11 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
       p.log.info(`Automatic install not possible (${staticOutcome.reason}); using ${runner.agent.definition.name}.`);
       const results = await runSteps(runner, SNIPPET_STEPS, ctx);
       reportSteps(telemetry, results, { harness, framework: staticOutcome.framework });
+      // Only `done` means the snippet is in; a skipped or unreported capture isn't.
       snippetResult =
-        results.capture?.status === 'failed'
-          ? { status: 'failed', reason: results.capture.detail }
-          : { status: 'installed', method: 'agent' };
+        results.capture?.status === 'done'
+          ? { status: 'installed', method: 'agent' }
+          : { status: 'failed', reason: results.capture?.detail || 'the agent did not install the snippet' };
     }
 
     if (snippetResult.status === 'failed') {
@@ -127,10 +135,12 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
       const summary = Object.fromEntries(
         Object.entries(results).map(([step, r]) => [step, { status: r!.status, detail: r!.detail }]),
       );
-      extras = { status: 'done', results: summary, files_changed: filesChanged(results) };
+      // Skipped steps are fine (no analytics, no sign-in); a failed one isn't.
+      const anyFailed = Object.values(results).some((r) => r?.status === 'failed');
+      extras = { status: anyFailed ? 'failed' : 'done', results: summary, files_changed: filesChanged(results) };
     }
 
-    telemetry.step('complete', 'success', { harness });
+    telemetry.step('complete', extras.status === 'failed' ? 'partial' : 'success', { harness });
     return finish({ snippet: snippetResult, extras, agent: agent?.definition.id ?? null }, 0);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

@@ -31,28 +31,28 @@ describe('readStepResult', () => {
 
   it('reads a well-formed result', () => {
     const dir = result({ status: 'done', detail: 'setIdentity in app/providers.tsx', files_changed: ['app/providers.tsx'] });
-    expect(readStepResult(dir, 'identify', 0)).toEqual({
+    expect(readStepResult(dir, 'identify')).toEqual({
       status: 'done',
       detail: 'setIdentity in app/providers.tsx',
       filesChanged: ['app/providers.tsx'],
     });
   });
 
-  it('ignores a result left over from an earlier run', () => {
-    const dir = result({ status: 'done', files_changed: [] });
-    expect(readStepResult(dir, 'identify', Date.now() + 60_000)).toBeUndefined();
-  });
-
   it('rejects an unknown status and strips terminal escapes from agent text', () => {
-    expect(readStepResult(result({ status: 'hacked' }), 'identify', 0)).toBeUndefined();
-    const parsed = readStepResult(result({ status: 'done', detail: '\u001b[2Jcleared\nscreen', files_changed: ['a.ts', 42] }), 'identify', 0);
+    expect(readStepResult(result({ status: 'hacked' }), 'identify')).toBeUndefined();
+    const parsed = readStepResult(result({ status: 'done', detail: '\u001b[2Jcleared\nscreen', files_changed: ['a.ts', 42] }), 'identify');
     expect(parsed?.detail).not.toContain('\u001b');
     expect(parsed?.detail).not.toContain('\n');
     expect(parsed?.filesChanged).toEqual(['a.ts']);
   });
 
+  it('keeps long paths whole', () => {
+    const long = `src/${'deeply/'.repeat(20)}component.tsx`;
+    expect(readStepResult(result({ status: 'done', files_changed: [long] }), 'identify')?.filesChanged).toEqual([long]);
+  });
+
   it('returns undefined for malformed JSON', () => {
-    expect(readStepResult(tmp({ [file]: '{ nope' }), 'identify', 0)).toBeUndefined();
+    expect(readStepResult(tmp({ [file]: '{ nope' }), 'identify')).toBeUndefined();
   });
 });
 
@@ -64,6 +64,11 @@ describe('prompts', () => {
     expect(prompt).toContain('# Identify users');
     expect(prompt).not.toContain('# Mask sensitive data');
     expect(prompt).toContain(resultFile('identify'));
+  });
+
+  it('inserts a snippet containing $ patterns verbatim', () => {
+    const snippet = "<script>a.replace(/x$/, \"$&$'\")</script>";
+    expect(buildStepPrompt('capture', { snippet })).toContain(snippet);
   });
 
   it('fills the org snippet into the capture step', () => {

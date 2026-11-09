@@ -27,13 +27,13 @@ const LABELS: Record<InstallStep, string> = {
 
 /**
  * The JSON an agent writes at the end of a step run, or undefined if it's
- * missing, left over from an earlier run, or malformed. Agent-written, so
+ * missing or malformed. runSteps deletes it before each launch, so any file
+ * found here is from this run. Agent-written, so
  * every field is checked and every string sanitized before display.
  */
-export function readStepResult(dir: string, step: InstallStep, since: number): StepResult | undefined {
+export function readStepResult(dir: string, step: InstallStep): StepResult | undefined {
   const file = path.join(dir, resultFile(step));
   try {
-    if (fs.statSync(file).mtimeMs < since) return undefined;
     const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as Record<string, unknown>;
     const { status, detail } = raw;
     if (status !== 'done' && status !== 'skipped' && status !== 'failed') return undefined;
@@ -41,7 +41,11 @@ export function readStepResult(dir: string, step: InstallStep, since: number): S
     return {
       status,
       detail: typeof detail === 'string' ? clean(detail) : '',
-      filesChanged: files.filter((f): f is string => typeof f === 'string').slice(0, 50).map(clean),
+      filesChanged: files
+        .filter((f): f is string => typeof f === 'string')
+        .slice(0, 50)
+        .map((f) => sanitizeTerminalOutput(f).trim())
+        .filter(Boolean),
     };
   } catch {
     return undefined;
@@ -77,7 +81,8 @@ export async function runSteps(runner: StepRunner, steps: InstallStep[], ctx: St
       p.log.info(pc.dim(`--print-prompt: skipping the ${step} run.`));
       continue;
     }
-    const startedAt = Date.now();
+    // Clear any result from an earlier run so whatever's there afterwards is this run's.
+    fs.rmSync(path.join(runner.dir, resultFile(step)), { force: true });
     const run = await runner.agent.definition.launch({
       prompt: buildStepPrompt(step, ctx),
       cwd: runner.dir,
@@ -86,7 +91,7 @@ export async function runSteps(runner: StepRunner, steps: InstallStep[], ctx: St
       label: LABELS[step],
       onEvent: (event, props) => runner.telemetry.note(event, props),
     });
-    const result = readStepResult(runner.dir, step, startedAt) ?? fallbackResult(run);
+    const result = readStepResult(runner.dir, step) ?? fallbackResult(run);
     if (result.status !== 'done' && run.finalMessage) p.log.message(pc.dim(run.finalMessage));
     results[step] = result;
     // A failed snippet install means nothing after it can work.
