@@ -238,15 +238,8 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // and never throws: a "no" here must not fail a run whose snippet is in.
     const confirmContinueEnriching = async (detail: string): Promise<boolean> => {
       if (options.yes) return true;
-      // Gate step 2 on the user finishing the demo above rather than prompting
-      // over it. The demo guide is a "leave the terminal and watch a session
-      // review" action; surfacing the enrichment decision (and its details)
-      // right on top of it competes for their attention. So hold here with a
-      // minimal prompt — keeping step 2 out of view — until they come back and
-      // signal they're ready. "No" is a clean exit for anyone done for now.
       const ready = await p.confirm({
-        message:
-          "Try the demo above first — this waits for you. Once you've watched a session review, press Enter to finish setting up Subtext, or choose No if you're done for now.",
+        message: 'Continue to the optional enrichment step?',
         initialValue: true,
       });
       if (p.isCancel(ready) || !ready) return false;
@@ -291,10 +284,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       // Plugin setup — we don't know the harness, so show every path.
       await offerPluginSetup(MANUAL_CHOICE, auth.region, options, onEvent);
       await showDemoGuide({
-        agentName: 'your coding agent',
+        auth,
         installPending: true,
-        clipboardHoldsInstallPrompt: copied,
         yes: options.yes,
+        dryRun: options.mock || options.printPrompt,
         onEvent,
       });
       if (
@@ -355,13 +348,10 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       });
       if (result.followUp?.length) p.note(result.followUp.join('\n'), 'Next steps');
       await showDemoGuide({
-        agentName: chosen.definition.name,
+        auth,
         installPending: true,
-        clipboardHoldsInstallPrompt: result.clipboardHoldsPrompt,
         yes: options.yes,
-        // Suppressed under --print-prompt so the demo's "Open agent?" offer
-        // can't launch the app during a dry run.
-        openTarget: options.printPrompt ? undefined : openTarget,
+        dryRun: options.mock || options.printPrompt,
         onEvent,
       });
       if (
@@ -472,21 +462,12 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       await offerPluginSetup(chosen, auth.region, options, onEvent, reviewToolsConsent);
     }
     await showDemoGuide({
-      agentName: chosen.definition.name,
+      auth,
       // Exit 0 without the agent's install marker means the install may have
-      // been refused or abandoned — frame the guide as post-install work.
+      // been refused or abandoned, so frame the guide as post-install work.
       installPending: !installConfirmed,
       yes: options.yes,
-      // Suppressed under --print-prompt so the demo's "Open agent?" offer can't
-      // spawn the agent during a dry run.
-      openTarget: options.printPrompt
-        ? undefined
-        : {
-            kind: 'terminal',
-            name: chosen.definition.name,
-            binaryPath: chosen.binaryPath,
-            dir: options.dir,
-          },
+      dryRun: options.mock || options.printPrompt,
       onEvent,
     });
 

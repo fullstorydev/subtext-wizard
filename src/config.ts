@@ -45,6 +45,7 @@ const DEV_HOST_OVERRIDES = [
   'SUBTEXT_API_BASE_URL',
   'SUBTEXT_APP_BASE_URL',
   'SUBTEXT_TELEMETRY_URL',
+  'SUBTEXT_FIRST_EVENT_URL',
 ] as const;
 
 type DevHostOverride = (typeof DEV_HOST_OVERRIDES)[number];
@@ -201,6 +202,16 @@ const TELEMETRY_PATH = '/subtext/telemetry';
 
 export function telemetryUrl(region: Region): string {
   return devHostOverride('SUBTEXT_TELEMETRY_URL') ?? `${apiBaseUrl(region)}${TELEMETRY_PATH}`;
+}
+
+/**
+ * Polled after the snippet install to detect the org's first captured session.
+ * Same auth as telemetry (OAuth token), no browser cookie needed.
+ */
+const FIRST_EVENT_PATH = '/subtext/install/first-event';
+
+export function firstEventUrl(region: Region): string {
+  return devHostOverride('SUBTEXT_FIRST_EVENT_URL') ?? `${apiBaseUrl(region)}${FIRST_EVENT_PATH}`;
 }
 
 /**
