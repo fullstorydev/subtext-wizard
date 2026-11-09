@@ -28,8 +28,6 @@ export interface StepContext {
   snippet?: string;
   /** Tools to link the session URL into; shapes the integrations step. */
   selection?: IntegrationSelection;
-  /** Auth libraries found in package.json; shapes the identify step. */
-  authLibraries?: string[];
 }
 
 function template(...segments: string[]): string {
@@ -39,13 +37,6 @@ function template(...segments: string[]): string {
 /** What the wizard already knows that narrows a step, appended after the page text. */
 function stepNotes(step: InstallStep, ctx: StepContext): string {
   const lines: string[] = [];
-  if (step === 'identify' && ctx.authLibraries) {
-    lines.push(
-      ctx.authLibraries.length > 0
-        ? `The setup CLI found ${ctx.authLibraries.join(', ')} in \`package.json\`. Start there.`
-        : 'The setup CLI found no known auth library in `package.json`. Check briefly for a custom auth flow (a user context, session cookie, or JWT decode); if there is no clear signed-in user, skip this step. Never invent one.',
-    );
-  }
   if (step === 'integrations' && ctx.selection) {
     const { integrations, other } = ctx.selection;
     if (integrations.length > 0 || other.length > 0) {

@@ -7,7 +7,6 @@ import { clackStub } from './test/helpers.js';
 const clack = clackStub();
 vi.mock('@clack/prompts', () => clack);
 
-const { detectAuthLibraries } = await import('./extras.js');
 const { readStepResult } = await import('./steps.js');
 const { EXTRAS_STEPS, INSTALL_STEPS, buildJoinedPrompt, buildStepPrompt, resultFile } = await import('./prompt/build.js');
 
@@ -25,17 +24,6 @@ function tmp(files: Record<string, string> = {}): string {
   }
   return dir;
 }
-
-describe('detectAuthLibraries', () => {
-  it('names auth libraries found in package.json', () => {
-    const dir = tmp({ 'package.json': JSON.stringify({ dependencies: { '@clerk/nextjs': '5', next: '15' } }) });
-    expect(detectAuthLibraries(dir)).toEqual(['Clerk']);
-  });
-
-  it('returns nothing without a package.json', () => {
-    expect(detectAuthLibraries(tmp())).toEqual([]);
-  });
-});
 
 describe('readStepResult', () => {
   const file = resultFile('identify');
@@ -72,15 +60,10 @@ describe('prompts', () => {
   const none = { integrations: [], other: [] };
 
   it('a step prompt carries one step and asks for that step\'s result file', () => {
-    const prompt = buildStepPrompt('identify', { selection: none, authLibraries: [] });
+    const prompt = buildStepPrompt('identify', { selection: none });
     expect(prompt).toContain('# Identify users');
     expect(prompt).not.toContain('# Mask sensitive data');
     expect(prompt).toContain(resultFile('identify'));
-    expect(prompt).toContain('found no known auth library');
-  });
-
-  it('points identity at the detected library', () => {
-    expect(buildStepPrompt('identify', { authLibraries: ['Clerk'] })).toContain('found Clerk in `package.json`');
   });
 
   it('fills the org snippet into the capture step', () => {

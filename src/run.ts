@@ -20,11 +20,11 @@ import {
 import { showLogo } from './logo.js';
 import { guidePluginSetup } from './plugin.js';
 import { offerPluginSetup, subtextPluginInstalled } from './pluginSetup.js';
-import { EXTRAS_STEPS, buildJoinedPrompt, buildStepPrompt, type InstallStep } from './prompt/build.js';
+import { EXTRAS_STEPS, SNIPPET_STEPS, buildJoinedPrompt, buildStepPrompt, type InstallStep } from './prompt/build.js';
 import { offerPromptReview } from './promptReview.js';
-import { detectAuthLibraries, showExtrasPlan, showExtrasResults, type ExtrasScope } from './extras.js';
+import { showExtrasPlan, showExtrasResults, type ExtrasScope } from './extras.js';
 import { fetchCaptureSnippet } from './snippet.js';
-import { detectCsp, runStaticInstall } from './staticInstall/index.js';
+import { runStaticInstall } from './staticInstall/index.js';
 import { filesChanged, reportSteps, runSteps, type StepResults } from './steps.js';
 import { Telemetry } from './telemetry.js';
 
@@ -105,7 +105,11 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     // faster and deterministic. Anything it can't place with certainty (or a
     // declined/failed edit) falls through to the agent-driven install below.
     const staticInstall = await runStaticInstall(snippet, options, onEvent);
-    const snippetInstalled = staticInstall.status !== 'fallback';
+    // After a static install the agent still checks for a CSP. An existing
+    // snippet is the user's own setup, so it's left as is.
+    const snippetSteps: InstallStep[] =
+      staticInstall.status === 'fallback' ? SNIPPET_STEPS : staticInstall.status === 'installed' ? ['csp'] : [];
+    const snippetInstalled = snippetSteps.length === 0;
 
     // 3. Find the user's coding agents and pick one. We never bring our own
     //    agent — the install always runs on a harness the user already has.
@@ -140,9 +144,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
     };
 
     // 5. The snippet steps. Terminal agents get one fresh run per step; the
-    //    user-driven handoffs get the same steps joined into one prompt. The
-    //    csp step is only included when the project actually has a policy.
-    const snippetSteps: InstallStep[] = detectCsp(options.dir) ? ['capture', 'csp'] : ['capture'];
+    //    user-driven handoffs get the same steps joined into one prompt.
     const snippetPrompt = isTerminalRun
       ? snippetSteps.map((step) => buildStepPrompt(step, { snippet })).join('\n\n---\n\n')
       : buildJoinedPrompt(snippetSteps, { snippet }, 'interactive');
@@ -212,8 +214,6 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       telemetry.step('start', undefined, { harness });
       if (staticInstall.status === 'already-installed') {
         telemetry.step('precheck', 'success', { already_installed: true, harness });
-      } else if (staticInstall.status === 'installed') {
-        telemetry.step('install', 'success', { framework: staticInstall.framework, csp_modified: false, harness });
       }
     };
 
@@ -240,7 +240,7 @@ export async function runWizard(options: WizardOptions): Promise<number> {
       } catch (error) {
         if (!(error instanceof CancelledError)) throw error;
       }
-      const scope = { selection, authLibraries: detectAuthLibraries(options.dir) };
+      const scope = { selection };
       showExtrasPlan(scope);
       return scope;
     };
@@ -375,7 +375,13 @@ export async function runWizard(options: WizardOptions): Promise<number> {
 
     // Phase 1: install the snippet, unless the wizard already did.
     const snippetResults: StepResults = snippetInstalled ? {} : await runSteps(runner, snippetSteps, { snippet });
-    reportSteps(telemetry, snippetResults, { harness });
+    if (staticInstall.status === 'installed') {
+      snippetResults.capture = { status: 'done', detail: '', filesChanged: [] };
+    }
+    reportSteps(telemetry, snippetResults, {
+      harness,
+      ...(staticInstall.status === 'installed' ? { framework: staticInstall.framework } : {}),
+    });
     const snippetFailed = snippetResults.capture?.status === 'failed';
     telemetry.note('wizard_completed', { agent: harness, snippet: snippetResults.capture?.status ?? 'static' });
 

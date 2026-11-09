@@ -88,7 +88,7 @@ describe('runHeadless', () => {
     expect(prompt).toContain('# Identify users');
   }, 10_000);
 
-  it('runs a fresh agent per extras step and collects each result', async () => {
+  it('runs a fresh agent for the CSP check and each extras step', async () => {
     const dir = viteProject();
     const prompts: string[] = [];
     agents.push({
@@ -110,6 +110,7 @@ describe('runHeadless', () => {
 
     expect(code).toBe(0);
     expect(prompts.map((p) => /^# .+$/m.exec(p.split('---').pop()!)?.[0])).toEqual([
+      '# Allow Subtext in the Content-Security-Policy',
       '# Identify users',
       '# Link sessions into existing tools',
       '# Mask sensitive data',

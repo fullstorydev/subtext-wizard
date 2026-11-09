@@ -14,11 +14,7 @@ This snippet is specific to this org. Copy it exactly; don't change the org id, 
 {{SNIPPET}}
 ```
 
-## 3. Check for a Content-Security-Policy
-
-Look for a CSP in framework config (`next.config.js`, `vercel.json`, `netlify.toml`), middleware (`helmet`, `middleware.ts`), or a `<meta http-equiv="Content-Security-Policy">` tag. If there is one, don't change it on this page; it's handled in its own step. A CSP that blocks the snippet makes capture fail silently.
-
-## 4. Place it
+## 3. Place it
 
 Find the framework and follow its guide:
 
@@ -30,4 +26,4 @@ Find the framework and follow its guide:
 - **React Native**: there's no HTML snippet. Install `@fullstory/react-native` (plus the platform link step from its README: pod install on iOS, Gradle config on Android) and call `init({ orgId })` once at the app entry point, before any screen renders, using the org id from the snippet. If the project keeps config in env vars (`EXPO_PUBLIC_*`, `react-native-config`), follow that convention.
 - **Anything else**: put the `<script>` inside `<head>`. With several HTML entry points, add it to every page that should be recorded; a shared header template is easier than copying it.
 
-Place it as early in `<head>` as possible, before the app bundle, and check the file still compiles.
+Place it as early in `<head>` as possible, before the app bundle, and check the file still compiles. Leave any Content-Security-Policy alone; it's handled in the next step.

@@ -1,6 +1,8 @@
 # Allow Subtext in the Content-Security-Policy
 
-The app has a CSP. Add these sources to it, editing the policy where it's defined. Keep every existing source.
+First check whether the app has a CSP: look in framework config (`next.config.js`, `vercel.json`, `netlify.toml`), middleware (`helmet`, `middleware.ts`), server or hosting headers, or a `<meta http-equiv="Content-Security-Policy">` tag. If it doesn't have one, stop here; there's nothing to change. React Native apps don't need this step.
+
+If it has one, add these sources to it, editing the policy where it's defined. Keep every existing source.
 
 US orgs (`-na1`):
 

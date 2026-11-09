@@ -6,11 +6,11 @@ import type { DetectedAgent } from './agents/types.js';
 import { authenticate, type SubtextAuth } from './auth.js';
 import type { WizardOptions } from './config.js';
 import { telemetryUrl } from './config.js';
-import { SUBTEXT_DIR, detectAuthLibraries, showExtrasResults } from './extras.js';
+import { SUBTEXT_DIR, showExtrasResults } from './extras.js';
 import { detectInstalledIntegrations, selectIntegrations } from './integrations.js';
-import { EXTRAS_STEPS, buildJoinedPrompt, type InstallStep, type StepContext } from './prompt/build.js';
+import { EXTRAS_STEPS, SNIPPET_STEPS, buildJoinedPrompt, type InstallStep, type StepContext } from './prompt/build.js';
 import { fetchCaptureSnippet } from './snippet.js';
-import { detectCsp, runStaticInstall, type StaticOutcome } from './staticInstall/index.js';
+import { runStaticInstall, type StaticOutcome } from './staticInstall/index.js';
 import { filesChanged, reportSteps, runSteps, type StepResult } from './steps.js';
 import { Telemetry } from './telemetry.js';
 
@@ -71,7 +71,7 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
     const staticOutcome: StaticOutcome = await runStaticInstall(snippet, { ...options, yes: true }, (event, props) =>
       telemetry.note(event, props),
     );
-    const ctx: StepContext = { snippet, authLibraries: detectAuthLibraries(options.dir) };
+    const ctx: StepContext = { snippet };
 
     if (options.externalAgent) return finish(writeAgentPrompt(options, staticOutcome, ctx), 0);
 
@@ -81,12 +81,13 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
     const runner = agent ? { agent, dir: options.dir, debug: options.debug, telemetry } : undefined;
 
     // 1. The snippet: written directly when the framework is recognized, by
-    //    the agent otherwise. The static install refuses when there's a CSP,
-    //    so the csp step only ever follows an agent capture run.
+    //    the agent otherwise. Either way the agent then checks for a CSP.
     let snippetResult: InstallResult['snippet'];
     if (staticOutcome.status === 'installed') {
       snippetResult = { status: 'installed', method: 'static', file: staticOutcome.file, framework: staticOutcome.framework };
-      reportSteps(telemetry, { capture: { status: 'done', detail: '', filesChanged: [] } }, { harness, framework: staticOutcome.framework });
+      const capture: StepResult = { status: 'done', detail: '', filesChanged: [] };
+      const results = runner ? await runSteps(runner, ['csp'], ctx) : {};
+      reportSteps(telemetry, { capture, ...results }, { harness, framework: staticOutcome.framework });
     } else if (staticOutcome.status === 'already-installed') {
       snippetResult = { status: 'installed', method: 'already-installed', file: staticOutcome.file };
       telemetry.step('precheck', 'success', { already_installed: true, harness });
@@ -97,8 +98,7 @@ export async function runHeadless(options: WizardOptions): Promise<number> {
       };
     } else {
       p.log.info(`Automatic install not possible (${staticOutcome.reason}); using ${runner.agent.definition.name}.`);
-      const steps: InstallStep[] = detectCsp(options.dir) ? ['capture', 'csp'] : ['capture'];
-      const results = await runSteps(runner, steps, ctx);
+      const results = await runSteps(runner, SNIPPET_STEPS, ctx);
       reportSteps(telemetry, results, { harness, framework: staticOutcome.framework });
       snippetResult =
         results.capture?.status === 'failed'
@@ -152,12 +152,12 @@ function writeAgentPrompt(options: WizardOptions, outcome: StaticOutcome, ctx: S
   let snippetResult: InstallResult['snippet'];
   if (outcome.status === 'installed') {
     snippetResult = { status: 'installed', method: 'static', file: outcome.file, framework: outcome.framework };
+    steps.push('csp');
   } else if (outcome.status === 'already-installed') {
     snippetResult = { status: 'installed', method: 'already-installed', file: outcome.file };
   } else {
     snippetResult = { status: 'pending', reason: outcome.reason };
-    steps.push('capture');
-    if (detectCsp(options.dir)) steps.push('csp');
+    steps.push(...SNIPPET_STEPS);
   }
   steps.push(...EXTRAS_STEPS);
   const selection = { integrations: detectInstalledIntegrations(options.dir), other: [] };
