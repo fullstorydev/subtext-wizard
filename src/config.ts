@@ -243,5 +243,12 @@ export interface WizardOptions {
   printPrompt: boolean;
   /** Skip the pre-launch confirmation (non-interactive/CI use). */
   yes: boolean;
+  /** Configure the codebase only, with no prompts at all (see headless.ts). */
+  headless?: boolean;
+  /** Headless only: use this org's snippet without authenticating. */
+  org?: string;
+  /** Headless only: write the remaining agent work to a prompt file instead of
+   * launching a local agent CLI (for hosted agents that run the wizard). */
+  externalAgent?: boolean;
   debug: boolean;
 }

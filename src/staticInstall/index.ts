@@ -4,14 +4,14 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import type { WizardOptions } from '../config.js';
 import { CancelledError } from '../integrations.js';
-import { findCsp, findExistingSnippet } from './checks.js';
+import { findExistingSnippet } from './checks.js';
 import { detectFramework } from './frameworks/index.js';
 import { readProject } from './project.js';
 
 /**
  * Install the capture snippet with plain code when the project is a framework
  * we recognize and there's exactly one obvious place for it. Anything less
- * certain (unknown framework, monorepo, CSP, ambiguous <head>, a file that
+ * certain (unknown framework, monorepo, ambiguous <head>, a file that
  * won't parse) returns a fallback, and the coding agent does the install.
  */
 
@@ -47,9 +47,6 @@ export function planStaticInstall(dir: string, snippetHtml: string): StaticPlan 
     if (!detection.ok) return { kind: 'fallback', reason: detection.reason, framework: detection.framework };
     const { plan } = detection;
     const { framework, file } = plan;
-
-    const csp = findCsp(project, file);
-    if (csp) return { kind: 'fallback', reason: `a Content-Security-Policy needs updating (${csp})`, framework };
 
     const body = snippetBody(snippetHtml);
     if (!body) return { kind: 'fallback', reason: 'unexpected snippet format', framework };

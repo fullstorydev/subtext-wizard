@@ -4,13 +4,11 @@ import * as p from '@clack/prompts';
 import pc from 'picocolors';
 import { firstExistingPath, runTerminalAgent, sanitizeTerminalOutput, which } from './helpers.js';
 import { printAgentAction, printAgentText } from './output.js';
-import { extractTelemetryMarkers } from './telemetry-marker.js';
 import type { AgentDefinition, LaunchContext, LaunchResult } from './types.js';
 
 /**
  * Tools the headless run is pre-authorized to use beyond edits: docs fetching
- * and dependency installs. Telemetry needs no tool here — the agent just prints
- * markers to stdout that the wizard parses. Everything else falls back to
+ * and dependency installs. Everything else falls back to
  * Claude Code's own permission rules.
  *
  * WebFetch is scoped to the two Subtext/Fullstory doc domains the install
@@ -92,7 +90,8 @@ function relativeTo(cwd: string, file: string): string {
 async function launch(ctx: LaunchContext): Promise<LaunchResult> {
   // --debug keeps the old streamed view (every tool call and message); the
   // default is one spinner line naming what the agent is doing right now.
-  const verbose = ctx.debug;
+  // Without a TTY (CI, the GitHub integration) a spinner can't redraw, so log lines instead.
+  const verbose = ctx.debug || !process.stdout.isTTY;
   const spinner = verbose ? undefined : p.spinner();
   if (verbose) {
     p.log.step('Running with Claude Code (headless)…');
@@ -138,11 +137,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
       if (event.type === 'assistant') {
         for (const block of event.message?.content ?? []) {
           if (block.type === 'text' && block.text?.trim()) {
-            // The prompt has the agent print telemetry markers as plain text;
-            // pull them out of the stream and display only the rest.
-            const text = sanitizeTerminalOutput(
-              extractTelemetryMarkers(block.text, ctx.onTelemetry),
-            ).trim();
+            const text = sanitizeTerminalOutput(block.text).trim();
             if (text) {
               if (verbose) printAgentText(text);
               lastAssistantText = text;
@@ -165,11 +160,7 @@ async function launch(ctx: LaunchContext): Promise<LaunchResult> {
     if (exitCode !== 0 && tail) p.log.message(pc.dim(tail.split('\n').slice(-15).join('\n')));
   }
 
-  // The result event normally repeats the final assistant message; strip any
-  // telemetry markers from it again (the caller dedupes re-reported ones).
-  const finalMessage = resultText
-    ? sanitizeTerminalOutput(extractTelemetryMarkers(resultText, ctx.onTelemetry)).trim()
-    : lastAssistantText;
+  const finalMessage = resultText ? sanitizeTerminalOutput(resultText).trim() : lastAssistantText;
   return { mode: 'ran', exitCode, finalMessage: finalMessage || undefined };
 }
 
