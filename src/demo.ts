@@ -1,98 +1,262 @@
 import * as p from '@clack/prompts';
 import pc from 'picocolors';
-import { brandPink, readableNoteBody } from './logo.js';
-import { offerCopyAndOpen, type OpenAgentTarget } from './openAgent.js';
+import type { SubtextAuth } from './auth.js';
+import { pollFirstEvent, type FirstEventResult } from './firstEvent.js';
+import { brandPink, pinkShade } from './logo.js';
 
 /**
- * The wizard's closing section: a short "see it in action" guide. Capture is
- * now wired into the app, so the user can watch the loop work end-to-end —
- * run the local dev server, click around to record a session, then ask the
- * same agent they just set up to review that session through the Subtext
- * plugin. Informational plus an optional clipboard copy; it never throws,
- * because everything before it has already succeeded and a cancel here must
- * not turn a finished install into a reported failure.
+ * The wizard's closing check: tell the user to run their dev server and click
+ * around, then watch for the org's first captured session right here in the
+ * terminal. Never throws, because everything before it already succeeded and
+ * a cancel here must not turn a finished install into a reported failure.
  */
 
-/** Kept as sentences so the note can show one per line while the clipboard
- * gets a single line — some terminal agents submit on a pasted newline. */
-const DEMO_PROMPT_LINES = [
-  'I just set up Subtext session capture in this app and clicked around my',
-  'local dev build. Use the Subtext tools to find my most recent captured',
-  'session and walk me through it: which pages I visited, what I interacted',
-  'with, and anything that looked broken or confusing along the way.',
-  'If the Subtext tools return an authentication or authorization error,',
-  'stop and tell me — I likely need to sign in to Subtext in this agent first.',
-];
-
-export const DEMO_PROMPT = DEMO_PROMPT_LINES.join(' ');
-
 export interface DemoGuideContext {
-  /** Harness display name ("Claude Code"), or "your coding agent" when the
-   * user took the raw prompt and we never learned which one. */
-  agentName: string;
-  /** True when the install isn't confirmed done — the prompt still has to run
+  auth: SubtextAuth;
+  /** True when the install isn't confirmed done: the prompt still has to run
    * (manual copy / GUI handoff), or a terminal run ended without the agent's
-   * install-success marker. The guide then leads with "once the install
-   * finishes" instead of presenting the snippet as already live. */
+   * install-success marker. */
   installPending: boolean;
-  /** Manual and GUI handoff paths: the install prompt currently occupies the
-   * clipboard, so copying the demo prompt now would clobber it. Warn in the
-   * confirm. */
-  clipboardHoldsInstallPrompt?: boolean;
-  /** --yes (CI): show the guide, skip the interactive copy offer. */
+  /** --yes (CI): show the steps, don't block on a browser session. */
   yes: boolean;
-  /** The harness to offer to open at the demo hand-off, when we know it (not
-   * the manual path). Copies the prompt and brings the agent up alongside it. */
-  openTarget?: OpenAgentTarget;
+  /** --mock / --print-prompt: there's no real org to poll. */
+  dryRun: boolean;
   onEvent: (event: string, properties?: Record<string, unknown>) => void;
+  /** Test seam. */
+  poll?: typeof pollFirstEvent;
 }
 
+const TITLE = 'First run';
+
 export async function showDemoGuide(ctx: DemoGuideContext): Promise<void> {
-  const lead = ctx.installPending
-    ? `Once the install finishes, make sure everything works.`
-    : `Installation complete — let's make sure everything works.`;
-  // clack renders note bodies dimmed; readableNoteBody resets per line so the
-  // steps read at full strength. The demo prompt itself is NOT in the box — it
-  // prints as a pink block in the timeline next to the copy action below, so
-  // it's clear which text the "copy?" question refers to.
-  p.note(
-    readableNoteBody(
-      [
-        lead,
-        pc.bold('Follow these steps:'),
-        '',
-        '1. Start (or restart) your local dev server so the new snippet is live.',
-        '2. Open the app in your browser and click around for a minute —',
-        '   Subtext is capturing your session as you go.',
-        `3. Open ${ctx.agentName} at this project and paste in the demo prompt`,
-        '   shown below — that part is the agent\'s job.',
-        '   The first time it reaches for a Subtext tool, your agent will ask you',
-        '   to sign in to Subtext — approve it so the tools can read your sessions.',
-        '',
-        pc.dim('Captured sessions can take a minute or two to show up.'),
-      ].join('\n'),
-    ),
-    'First run',
-  );
+  const lead = ctx.installPending ? [] : ["Installation complete. Let's check that capture works.", ''];
+  const steps = [
+    ...lead,
+    pc.bold('1. Start (or restart) your local dev server so the new snippet is live.'),
+    pc.bold('2. Open the app in your browser and click around for a minute.'),
+  ];
   ctx.onEvent('demo_guide_shown', { install_pending: ctx.installPending });
 
-  // The agent-facing prompt, in brand pink, as its own timeline block right
-  // above the copy question — clack anchors the active prompt at the bottom,
-  // so the prompt has to sit just before it (nothing can render below a live
-  // question). This keeps it out of the box and directly beside the action.
-  p.log.message(DEMO_PROMPT_LINES.map((line) => brandPink(line)).join('\n'));
+  const watching = !ctx.yes && !ctx.dryRun;
+  if (!watching || !process.stdout.isTTY) {
+    const tail = watching ? ['', 'Waiting for your first session…'] : [];
+    process.stdout.write(renderBox(TITLE, [...steps, ...tail]).join('\n') + '\n');
+    if (!watching) return;
+  }
 
-  if (ctx.yes) return;
+  const result = await waitForFirstSession(ctx, steps);
+  ctx.onEvent('first_event_result', { status: result.status });
+  switch (result.status) {
+    case 'received':
+      p.log.success(
+        `${pc.green('Subtext is capturing sessions.')} Ask your coding agent to review your latest session any time.`,
+      );
+      return;
+    case 'timeout':
+      p.log.warn(
+        "No session yet. Make sure the dev server picked up the snippet and you've loaded a page; it can take a minute or two to show up.",
+      );
+      return;
+    case 'unavailable':
+      p.log.warn(
+        `Couldn't check for sessions from here (${result.reason}). Your sessions will still show up in Subtext once you've clicked around.`,
+      );
+      return;
+    case 'aborted':
+      p.log.info('Skipped waiting for a session.');
+      return;
+  }
+}
 
-  await offerCopyAndOpen({
-    prompt: DEMO_PROMPT,
-    agentName: ctx.agentName,
-    target: ctx.openTarget,
-    clipboardBusy: ctx.clipboardHoldsInstallPrompt,
-    label: 'demo prompt',
-    readyHint: "after you've clicked around",
-    onEvent: ctx.onEvent,
-    copiedEvent: 'demo_prompt_copied',
-    openedEvent: 'demo_agent_opened',
-  });
+async function waitForFirstSession(
+  ctx: DemoGuideContext,
+  steps: string[],
+): Promise<FirstEventResult> {
+  const poll = ctx.poll ?? pollFirstEvent;
+  for (;;) {
+    const result = await pollInBox(ctx.auth, poll, steps);
+    if (result.status !== 'timeout') return result;
+    const again = await p.confirm({ message: 'Still no session. Keep waiting?', initialValue: true });
+    if (p.isCancel(again) || !again) return result;
+  }
+}
+
+/**
+ * Draws the instructions box with a live watcher at the bottom, redrawn in
+ * place every frame. clack's note() is print-once, so the box is ours, drawn
+ * to match clack's note style.
+ */
+async function pollInBox(
+  auth: SubtextAuth,
+  poll: typeof pollFirstEvent,
+  steps: string[],
+): Promise<FirstEventResult> {
+  const out = process.stdout;
+  const controller = new AbortController();
+  // Ctrl+C skips the wait instead of killing the wizard, so phase 2 still runs.
+  const onSigint = () => controller.abort();
+  process.on('SIGINT', onSigint);
+  if (!out.isTTY) {
+    try {
+      return await poll(auth, { signal: controller.signal });
+    } finally {
+      process.removeListener('SIGINT', onSigint);
+    }
+  }
+
+  // Raw mode so typed keys aren't echoed into the frame; an echoed Enter adds a
+  // line and the cursor-up redraw would then land one row off. Raw mode also
+  // swallows SIGINT, so Ctrl+C is caught as a byte here instead.
+  const stdin = process.stdin;
+  const canRaw = stdin.isTTY && typeof stdin.setRawMode === 'function';
+  const onKey = (data: Buffer) => {
+    if (data.includes(0x03)) controller.abort();
+  };
+  if (canRaw) {
+    stdin.setRawMode(true);
+    stdin.on('data', onKey);
+    stdin.resume();
+  }
+  const restoreCursor = () => {
+    out.write('\x1b[?25h');
+    if (canRaw) {
+      stdin.removeListener('data', onKey);
+      stdin.setRawMode(false);
+      stdin.pause();
+    }
+  };
+  process.once('exit', restoreCursor);
+  const started = Date.now();
+  let frame = 0;
+  let drawnLines = 0;
+  const draw = (watcher: string[]) => {
+    const lines = renderBox(TITLE, [...steps, '', ...watcher]);
+    // renderBox never exceeds the terminal width, so no line wraps and the
+    // count is exact. A resize mid-wait can still leave a stray frame behind.
+    if (drawnLines > 0) out.write(`\x1b[${drawnLines}A\x1b[0J`);
+    out.write(lines.join('\n') + '\n');
+    drawnLines = lines.length;
+  };
+
+  out.write('\x1b[?25l');
+  const timer = setInterval(() => draw(watcherFrame(frame++, Date.now() - started)), 80);
+  draw(watcherFrame(frame++, 0));
+  try {
+    const result = await poll(auth, { signal: controller.signal });
+    clearInterval(timer);
+    draw(finalFrame(result, Date.now() - started));
+    return result;
+  } finally {
+    clearInterval(timer);
+    restoreCursor();
+    process.removeListener('exit', restoreCursor);
+    process.removeListener('SIGINT', onSigint);
+  }
+}
+
+const SPINNER = ['◐', '◓', '◑', '◒'];
+
+function watcherFrame(frame: number, elapsedMs: number): string[] {
+  const width = innerWidth() - 2;
+  const dots = '.'.repeat(Math.floor(frame / 6) % 4).padEnd(3);
+  const spin = brandPink(SPINNER[Math.floor(frame / 3) % SPINNER.length]);
+  const heading = `${spin}  ${pc.bold(brandPink(`Waiting for your first session${dots}`))}`;
+  return [
+    padBetween(heading, pc.dim(formatElapsed(elapsedMs)), width),
+    '',
+    sweepBar(frame, width),
+    '',
+    pc.dim('Sessions can take a minute to appear. Ctrl+C to skip.'),
+  ];
+}
+
+function finalFrame(result: FirstEventResult, elapsedMs: number): string[] {
+  const width = innerWidth() - 2;
+  const time = pc.dim(formatElapsed(elapsedMs));
+  switch (result.status) {
+    case 'received':
+      return [
+        padBetween(`${pc.green('✔')}  ${pc.bold(pc.green('First session captured!'))}`, time, width),
+        '',
+        pc.green('━'.repeat(width)),
+      ];
+    case 'aborted':
+      return [padBetween(`${pc.yellow('■')}  Stopped waiting.`, time, width)];
+    case 'timeout':
+      return [padBetween(`${pc.yellow('▲')}  No session yet.`, time, width)];
+    case 'unavailable':
+      return [padBetween(`${pc.yellow('▲')}  Couldn't check for sessions.`, time, width)];
+  }
+}
+
+/** A pink comet sweeping back and forth across a dim track. */
+function sweepBar(frame: number, width: number): string {
+  const tail = Math.max(6, Math.floor(width / 5));
+  const span = width + tail;
+  const t = frame % (span * 2);
+  const forward = t < span;
+  const head = forward ? t : span * 2 - t;
+  let bar = '';
+  for (let i = 0; i < width; i++) {
+    const dist = forward ? head - i : i - (head - tail);
+    bar += dist >= 0 && dist < tail ? pinkShade('━', 1 - dist / tail) : pc.dim('─');
+  }
+  return bar;
+}
+
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+const visibleLength = (s: string) => s.replace(ANSI, '').length;
+
+function innerWidth(): number {
+  const columns = process.stdout.columns || 80;
+  return Math.max(30, Math.min(76, columns - 4));
+}
+
+function padBetween(left: string, right: string, width: number): string {
+  const gap = Math.max(1, width - visibleLength(left) - visibleLength(right));
+  return left + ' '.repeat(gap) + right;
+}
+
+function wrap(line: string, width: number): string[] {
+  if (visibleLength(line) <= width) return [line];
+  const plain = line.replace(ANSI, '');
+  if (plain !== line) {
+    // Re-apply the line's leading style to each wrapped piece so bold steps stay bold.
+    const lead = line.match(/^(?:\x1b\[[0-9;]*m)+/)?.[0] ?? '';
+    return wrap(plain, width).map((piece) => `${lead}${piece}\x1b[0m`);
+  }
+  const lines: string[] = [];
+  let current = '';
+  for (const word of plain.split(' ')) {
+    if (current && current.length + 1 + word.length > width) {
+      lines.push(current);
+      current = `   ${word}`;
+    } else {
+      current = current ? `${current} ${word}` : word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+}
+
+/** Same shape clack's note() draws, so it sits in the timeline seamlessly. */
+function renderBox(title: string, body: string[]): string[] {
+  const inner = innerWidth();
+  const bar = pc.gray('│');
+  const rows = body.flatMap((line) => wrap(line, inner - 2));
+  const titleRule = pc.gray(`${'─'.repeat(Math.max(1, inner - title.length - 1))}╮`);
+  const blank = `${bar}${' '.repeat(inner + 2)}${bar}`;
+  return [
+    bar,
+    `${pc.green('◇')}  ${pc.reset(title)} ${titleRule}`,
+    blank,
+    ...rows.map((row) => `${bar}  ${row}${' '.repeat(Math.max(0, inner - visibleLength(row)))}${bar}`),
+    blank,
+    pc.gray(`├${'─'.repeat(inner + 2)}╯`),
+  ];
+}
+
+function formatElapsed(ms: number): string {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
